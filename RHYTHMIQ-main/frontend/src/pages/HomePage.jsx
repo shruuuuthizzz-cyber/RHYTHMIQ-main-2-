@@ -22,6 +22,18 @@ const moodImages = {
   late_night: 'https://images.unsplash.com/photo-1514525253440-b393452e8d26?auto=format&fit=crop&q=80&w=1200'
 };
 
+const normalizeAdminRecommendation = (recommendation) => ({
+  id: recommendation.spotify_track_id || `admin-rec-${recommendation.id}`,
+  name: recommendation.track_name || 'Unknown Track',
+  artists: [{ name: recommendation.artist_name || 'Unknown Artist' }],
+  album: {
+    name: recommendation.album_name || 'Recommended for You',
+    images: recommendation.album_image ? [{ url: recommendation.album_image }] : [],
+  },
+  preview_url: recommendation.preview_url || null,
+  duration_ms: recommendation.duration_ms || null,
+});
+
 export default function HomePage() {
   const { user } = useAuth();
   const { playTrack } = usePlayer();
@@ -64,17 +76,7 @@ export default function HomePage() {
       }
 
       if (adminRecsRes.status === 'fulfilled') {
-        const nextRecommendations = (adminRecsRes.value.data?.recommendations || []).map((recommendation) => ({
-          id: recommendation.spotify_track_id,
-          name: recommendation.track_name,
-          artists: [{ name: recommendation.artist_name || 'Unknown Artist' }],
-          album: {
-            name: recommendation.album_name,
-            images: [{ url: recommendation.album_image }],
-          },
-          preview_url: recommendation.preview_url,
-          duration_ms: recommendation.duration_ms,
-        }));
+        const nextRecommendations = (adminRecsRes.value.data?.recommendations || []).map(normalizeAdminRecommendation);
         setRecommendations(nextRecommendations);
       } else {
         console.error('Admin recommendations load error', adminRecsRes.reason);

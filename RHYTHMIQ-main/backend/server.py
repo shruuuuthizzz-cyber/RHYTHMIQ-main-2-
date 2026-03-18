@@ -311,6 +311,39 @@ GENRE_TO_MOODS = {
 }
 
 LYRA_GREETING_KEYWORDS = {"hi", "hello", "hey", "yo", "sup", "hola"}
+LYRA_DISCOVERY_KEYWORDS = {
+    "play", "suggest", "recommend", "show", "find", "search", "queue", "listen",
+    "songs", "song", "music", "tracks", "track", "playlist", "artist", "genre",
+    "mood", "vibe", "vibes", "language",
+}
+LYRA_NON_DISCOVERY_TOKENS = {
+    "who", "what", "when", "where", "why", "how", "explain", "help", "about",
+    "yourself", "feature", "features", "app", "project",
+}
+LYRA_QUERY_STOPWORDS = {
+    "lyra", "please", "pls", "can", "could", "would", "you", "me", "my", "for",
+    "to", "the", "a", "an", "some", "any", "something", "want", "need", "with",
+    "show", "give", "find", "search", "suggest", "recommend", "queue", "listen",
+    "play", "put", "on", "tell", "send", "let", "hear", "music", "songs", "song",
+    "tracks", "track", "playlist", "playlists", "genre", "genres", "mood", "moods",
+    "vibe", "vibes", "language", "languages", "artist", "artists", "of", "by",
+    "i", "im", "i'm", "am", "feeling", "feel", "today", "now", "right",
+}
+LYRA_LANGUAGE_KEYWORDS = {
+    "Hindi": ["hindi", "bollywood", "desi"],
+    "English": ["english", "western", "international"],
+    "Punjabi": ["punjabi"],
+    "Tamil": ["tamil"],
+    "Telugu": ["telugu"],
+    "Malayalam": ["malayalam"],
+    "Kannada": ["kannada"],
+    "Marathi": ["marathi"],
+    "Bengali": ["bengali", "bangla"],
+    "Gujarati": ["gujarati"],
+    "Korean": ["korean", "kpop", "k-pop"],
+    "Japanese": ["japanese", "jpop", "j-pop", "anime"],
+    "Spanish": ["spanish", "latin", "reggaeton"],
+}
 LYRA_MOOD_SEARCH_HINTS = {
     "Energetic": "workout energy hits",
     "Chill": "chill lofi calm vibes",
@@ -340,6 +373,31 @@ def build_local_lyra_reply(message: str, username: str, suggested_tracks: Option
             f"Hey {username}, I can line up something chill, romantic, workout, sad, or party-heavy. "
             "Tap one of the song suggestions below or tell me the vibe you want."
         )
+
+    if suggested_tracks:
+        summary_items = []
+        for track in suggested_tracks[:3]:
+            artist_name = ", ".join(
+                artist.get("name")
+                for artist in (track.get("artists") or [])
+                if isinstance(artist, dict) and artist.get("name")
+            ) or track.get("artist_name") or "Unknown Artist"
+            track_name = track.get("name") or track.get("track_name")
+            if track_name:
+                summary_items.append(f"{track_name} by {artist_name}")
+
+        if summary_items:
+            request_focus = describe_lyra_request(message)
+            numbered_recommendations = "\n".join(
+                f"{index + 1}. {item}"
+                for index, item in enumerate(summary_items)
+            )
+            return (
+                f"Here are a few {request_focus} I'd recommend for you, {username}:\n"
+                f"{numbered_recommendations}\n"
+                "These are the closest matches I found and they are ready to play with YouTube audio below."
+            )
+
     if is_hindi_romantic_request(message):
         intro = "For a Hindi romantic mood, start with"
         fallback_titles = ["Dil Ki Baarish", "Teri Baatein", "Ishq Wali Raat"]
@@ -360,17 +418,6 @@ def build_local_lyra_reply(message: str, username: str, suggested_tracks: Option
         fallback_titles = ["Neon Lights", "Velvet Sky", "Dream Catcher"]
 
     recommendations = []
-    track_source = suggested_tracks or []
-    for track in track_source[:3]:
-        artist_name = ", ".join(
-            artist.get("name")
-            for artist in (track.get("artists") or [])
-            if isinstance(artist, dict) and artist.get("name")
-        ) or track.get("artist_name") or "Unknown Artist"
-        track_name = track.get("name") or track.get("track_name")
-        if track_name:
-            recommendations.append(f"{track_name} by {artist_name}")
-
     if not recommendations:
         for title in fallback_titles:
             track = next((item for item in SAMPLE_TRACKS if item["name"] == title), None)
@@ -399,63 +446,211 @@ def detect_lyra_moods(message: str) -> List[str]:
     return list(dict.fromkeys(matched))
 
 
-def build_lyra_search_query(message: str, taste_profile: Optional[dict]) -> str:
+def detect_lyra_languages(message: str) -> List[str]:
     text = message.lower()
-    prefers_hindi = any(term in text for term in ["hindi", "bollywood", "desi"])
+    matched = []
+    for language, keywords in LYRA_LANGUAGE_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            matched.append(language)
+    return list(dict.fromkeys(matched))
+
+
+def detect_lyra_genres(message: str) -> List[str]:
+    text = message.lower()
+    matched = []
+    for genre, keywords in GENRE_KEYWORDS.items():
+        if genre.lower() in text or any(keyword in text for keyword in keywords):
+            matched.append(genre)
+    return list(dict.fromkeys(matched))
+
+
+def looks_like_named_music_request(message: str) -> bool:
+    cleaned = clean_lyra_search_text(message)
+    tokens = cleaned.split()
+    if not tokens or len(tokens) > 4:
+        return False
+    if any(token in LYRA_NON_DISCOVERY_TOKENS for token in tokens):
+        return False
+    return True
+
+
+def describe_lyra_request(message: str) -> str:
+    languages = detect_lyra_languages(message)
+    genres = detect_lyra_genres(message)
+    moods = detect_lyra_moods(message)
+    cleaned = clean_lyra_search_text(message).strip()
+
+    if is_hindi_romantic_request(message):
+        return "Hindi romantic songs"
+
+    lowered = message.lower()
+    if (
+        cleaned
+        and len(cleaned.split()) <= 4
+        and not any(keyword in lowered for keyword in LYRA_DISCOVERY_KEYWORDS)
+    ):
+        return f"{cleaned} songs"
+
+    parts = []
+    parts.extend(language for language in languages[:1])
+    parts.extend(mood.lower() for mood in moods[:1])
+
+    if genres:
+        genre_label = genres[0]
+        genre_words = [
+            word
+            for word in re.findall(r"[a-z0-9]+", genre_label.lower())
+            if word not in {mood.lower() for mood in moods}
+        ]
+        if genre_words:
+            parts.append(" ".join(genre_words))
+
+    if parts:
+        return " ".join(parts) + " songs"
+
+    if cleaned:
+        if re.search(r"\b(song|songs|music|track|tracks)\b", cleaned):
+            return cleaned
+        return f"{cleaned} songs"
+
+    return "song"
+
+
+def is_lyra_discovery_request(message: str) -> bool:
+    text = message.lower()
+    if is_lyra_greeting(message):
+        return True
+    if detect_lyra_languages(message) or detect_lyra_genres(message) or detect_lyra_moods(message):
+        return True
+    if looks_like_named_music_request(message):
+        return True
+    return any(keyword in text for keyword in LYRA_DISCOVERY_KEYWORDS)
+
+
+def clean_lyra_search_text(message: str) -> str:
+    normalized = re.sub(r"[^a-z0-9\s&'+-]", " ", message.lower())
+    tokens = [
+        token
+        for token in normalized.split()
+        if token and token not in LYRA_QUERY_STOPWORDS
+    ]
+    return " ".join(tokens)
+
+
+def dedupe_query_terms(items: List[str]) -> List[str]:
+    deduped = []
+    seen = set()
+    for item in items:
+        cleaned = (item or "").strip()
+        if not cleaned:
+            continue
+        normalized = re.sub(r"[^a-z0-9]+", "", cleaned.lower())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(cleaned)
+    return deduped
+
+
+def build_lyra_search_queries(message: str, taste_profile: Optional[dict]) -> List[str]:
+    text = message.lower()
+    languages = detect_lyra_languages(message)
+    genres = detect_lyra_genres(message)
+    moods = detect_lyra_moods(message)
+    cleaned = clean_lyra_search_text(message)
+    mood_tokens = {token.lower() for token in moods}
+    descriptor_terms = []
+    descriptor_terms.extend(language.lower() for language in languages[:2])
+    for genre in genres[:2]:
+        genre_words = [word for word in re.findall(r"[a-z0-9]+", genre.lower()) if word not in mood_tokens]
+        descriptor_terms.append(" ".join(genre_words) if genre_words else genre.lower())
+    descriptor_terms.extend(mood.lower() for mood in moods[:2])
+    queries: List[str] = []
 
     if is_lyra_greeting(message):
         if taste_profile and taste_profile.get("has_data"):
             base_terms = []
-            base_terms.extend(taste_profile.get("top_artists", [])[:1])
+            base_terms.extend(taste_profile.get("top_artists", [])[:2])
             base_terms.extend(taste_profile.get("top_genres", [])[:2])
             base_terms.extend(taste_profile.get("top_moods", [])[:1])
-            return " ".join(term for term in base_terms if term) or "feel good hits"
-        return "feel good hits"
+            queries.append(" ".join(term for term in base_terms if term))
+        queries.extend([
+            "feel good songs",
+            "hindi english feel good songs",
+        ])
+        return dedupe_query_terms(queries)
 
-    matched_moods = detect_lyra_moods(message)
-    if matched_moods:
-        primary_mood = matched_moods[0]
-        if prefers_hindi and primary_mood == "Romantic":
-            parts = ["hindi romantic bollywood love songs arijit shreya atif"]
-        elif prefers_hindi:
-            parts = [f"hindi {LYRA_MOOD_SEARCH_HINTS.get(primary_mood, primary_mood)}"]
-        else:
-            parts = [LYRA_MOOD_SEARCH_HINTS.get(primary_mood, primary_mood)]
-        if taste_profile and taste_profile.get("top_artists"):
-            parts.append(taste_profile["top_artists"][0])
-        return " ".join(parts)
+    if cleaned:
+        base_query = cleaned if re.search(r"\b(song|songs|music|track|tracks)\b", cleaned) else f"{cleaned} songs"
+        queries.append(base_query)
 
-    if taste_profile and taste_profile.get("has_data"):
-        if any(keyword in text for keyword in ["recommend", "suggest", "listen", "music", "songs", "play"]):
-            base_terms = []
-            if prefers_hindi:
-                base_terms.append("hindi bollywood songs")
-            base_terms.extend(taste_profile.get("top_artists", [])[:1])
-            base_terms.extend(taste_profile.get("top_genres", [])[:2])
-            return " ".join(term for term in [message, *base_terms] if term)
+    if descriptor_terms:
+        descriptor_query = " ".join(dedupe_query_terms([
+            *cleaned.split(),
+            *descriptor_terms,
+            "songs",
+        ]))
+        queries.append(descriptor_query)
 
-    if prefers_hindi:
-        return f"hindi bollywood {message}"
+    if moods:
+        queries.extend(
+            f"{language.lower()} {LYRA_MOOD_SEARCH_HINTS.get(mood, mood).lower()}"
+            for language in languages[:1]
+            for mood in moods[:1]
+        )
+        queries.extend(
+            LYRA_MOOD_SEARCH_HINTS.get(mood, mood).lower()
+            for mood in moods[:2]
+        )
 
-    return message
+    if taste_profile and taste_profile.get("has_data") and not descriptor_terms:
+        personal_terms = []
+        personal_terms.extend(taste_profile.get("top_artists", [])[:1])
+        personal_terms.extend(taste_profile.get("top_genres", [])[:2])
+        personal_terms.extend(taste_profile.get("top_moods", [])[:1])
+        if personal_terms:
+            queries.append(" ".join(personal_terms))
+
+    if not queries and languages:
+        queries.append(f"{languages[0].lower()} songs")
+    if not queries and genres:
+        queries.append(f"{genres[0].lower()} songs")
+    if not queries and moods:
+        queries.append(f"{moods[0].lower()} songs")
+    if not queries:
+        queries.append(message.strip())
+
+    return dedupe_query_terms(queries)
 
 
 async def build_lyra_track_suggestions(message: str, user_id: str, db: AsyncSession, limit: int = 6) -> List[dict]:
     taste_profile = await build_user_taste_profile(user_id, db)
-    query = build_lyra_search_query(message, taste_profile)
+    if not is_lyra_discovery_request(message):
+        return []
+
+    queries = build_lyra_search_queries(message, taste_profile)
+
+    youtube_tracks = await collect_youtube_track_candidates(queries, per_query=max(limit, 5))
+    if youtube_tracks:
+        if is_lyra_greeting(message):
+            return rank_tracks_for_user(youtube_tracks, taste_profile, limit)
+        return youtube_tracks[:limit]
 
     if sp:
         try:
-            results = sp.search(q=query, type="track", limit=limit)
-            tracks = results.get("tracks", {}).get("items", [])
-            if tracks:
-                return tracks[:limit]
+            spotify_candidates = collect_track_candidates(queries, per_query=max(limit, 5))
+            if spotify_candidates:
+                if is_lyra_greeting(message):
+                    return rank_tracks_for_user(spotify_candidates, taste_profile, limit)
+                return spotify_candidates[:limit]
         except Exception as exc:
             logger.warning(f"LYRA suggestion search fallback: {exc}")
 
-    fallback_results = search_sample_data(query, "track", limit)
+    fallback_results = search_sample_data(" ".join(queries), "track", limit)
     sample_tracks = fallback_results.get("tracks", {}).get("items", []) if isinstance(fallback_results, dict) else []
     if sample_tracks:
+        if is_lyra_greeting(message):
+            return rank_tracks_for_user(sample_tracks, taste_profile, limit)
         return sample_tracks[:limit]
 
     return rank_tracks_for_user(SAMPLE_TRACKS, taste_profile, limit)
@@ -1011,6 +1206,35 @@ def dedupe_tracks(tracks: List[dict]) -> List[dict]:
         unique_tracks.append(track)
 
     return unique_tracks
+
+
+async def collect_youtube_track_candidates(queries: List[str], per_query: int = 8) -> List[dict]:
+    normalized_queries = []
+    seen_queries = set()
+
+    for query in queries or []:
+        cleaned = (query or "").strip()
+        lowered = cleaned.lower()
+        if not cleaned or lowered in seen_queries:
+            continue
+        seen_queries.add(lowered)
+        normalized_queries.append(cleaned)
+
+    if not normalized_queries:
+        return []
+
+    results = await asyncio.gather(
+        *(search_youtube_tracks(query, per_query) for query in normalized_queries),
+        return_exceptions=True,
+    )
+
+    tracks: List[dict] = []
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        tracks.extend(result or [])
+
+    return dedupe_tracks(tracks)
 
 
 def parse_release_date(value: Optional[str]) -> Optional[datetime]:
@@ -1993,23 +2217,43 @@ async def spotify_new_releases(limit: int = 20, authorization: str = Query(None,
 
     release_queries = [
         "latest hindi songs 2026",
-        "latest english songs 2026",
+        "new bollywood songs 2026",
+        "latest hindi romantic songs 2026",
         "latest punjabi songs 2026",
-        "latest tamil telugu songs 2026",
     ]
     if taste_profile and taste_profile.get("has_data"):
-        release_queries.extend(f"{artist} latest release" for artist in taste_profile["top_artists"][:2])
-        release_queries.extend(f"{genre} new release songs" for genre in taste_profile["top_genres"][:2])
+        release_queries.extend(
+            f"{artist} latest hindi song"
+            for artist in taste_profile["top_artists"][:2]
+        )
+        release_queries.extend(
+            f"{genre} hindi new songs"
+            for genre in taste_profile["top_genres"][:2]
+        )
 
-    release_candidates = collect_track_candidates(release_queries, per_query=max(6, limit))
+    youtube_release_tracks = await collect_youtube_track_candidates(
+        release_queries,
+        per_query=max(6, limit),
+    )
     ranked_release_tracks = sorted(
-        release_candidates,
+        youtube_release_tracks,
         key=lambda track: (
-            score_release_freshness((track.get("album") or {}).get("release_date")) +
-            score_track_against_taste(track, taste_profile)
+            score_track_against_taste(track, taste_profile),
+            track.get("popularity") or 0,
         ),
         reverse=True,
     )
+
+    if not ranked_release_tracks:
+        release_candidates = collect_track_candidates(release_queries, per_query=max(6, limit))
+        ranked_release_tracks = sorted(
+            release_candidates,
+            key=lambda track: (
+                score_release_freshness((track.get("album") or {}).get("release_date")) +
+                score_track_against_taste(track, taste_profile)
+            ),
+            reverse=True,
+        )
     if not ranked_release_tracks:
         ranked_release_tracks = rank_tracks_for_user(SAMPLE_TRACKS, taste_profile, limit)
 
@@ -2126,12 +2370,61 @@ async def time_of_day_suggestions(hour: Optional[int] = None, limit: int = 20, a
         mood = "Hindi + English evening vibes"
     elif 20 <= current_hour < 24:
         period = "night"
-        search_query = "night drive hindi english mix party"
-        mood = "Hindi + English night energy"
+        search_query = "night vibes hindi bollywood songs"
+        mood = "Hindi YouTube night vibes"
     else:
         period = "late_night"
-        search_query = "late night calm hindi english mix"
-        mood = "Hindi + English after-hours calm"
+        search_query = "late night soft hindi songs"
+        mood = "Hindi YouTube late-night calm"
+
+    if period in {"night", "late_night"}:
+        youtube_queries = [
+            search_query,
+            f"{period.replace('_', ' ')} hindi songs",
+            f"{period.replace('_', ' ')} bollywood songs",
+        ]
+        if period == "night":
+            youtube_queries.extend([
+                "hindi night drive songs",
+                "bollywood party night songs",
+            ])
+        else:
+            youtube_queries.extend([
+                "late night hindi romantic songs",
+                "hindi soft songs for night",
+            ])
+
+        if taste_profile and taste_profile.get("has_data"):
+            youtube_queries.extend(
+                f"{artist} {period.replace('_', ' ')} songs"
+                for artist in taste_profile["top_artists"][:2]
+            )
+            youtube_queries.extend(
+                f"{genre} hindi {period.replace('_', ' ')} songs"
+                for genre in taste_profile["top_genres"][:2]
+            )
+
+        youtube_tracks = await collect_youtube_track_candidates(
+            youtube_queries,
+            per_query=max(6, limit),
+        )
+        ranked_youtube_tracks = rank_tracks_for_user(
+            youtube_tracks or get_sample_tracks_for_period(period) + SAMPLE_TRACKS,
+            taste_profile,
+            limit,
+            period,
+        )
+        personalized_mood = mood
+        if taste_profile and taste_profile.get("has_data"):
+            anchor = taste_profile["top_artists"][:1] or taste_profile["top_genres"][:1]
+            if anchor:
+                personalized_mood = f"{mood} tuned with {anchor[0]}"
+        return {
+            "period": period,
+            "mood": personalized_mood,
+            "hour": current_hour,
+            "tracks": ranked_youtube_tracks[:limit],
+        }
     
     try:
         personalized_query = search_query
@@ -2484,12 +2777,12 @@ If they ask you to play something or create a playlist, suggest specific songs t
         except Exception as e:
             logger.error(f"LYRA OpenAI error: {e}")
 
+    suggested_tracks = await build_lyra_track_suggestions(req.message, user.id, db, limit=6)
+
     if not response_text:
         used_local_reply = True
 
-    suggested_tracks = await build_lyra_track_suggestions(req.message, user.id, db, limit=6)
-
-    if used_local_reply:
+    if used_local_reply or is_lyra_discovery_request(req.message):
         response_text = build_local_lyra_reply(req.message, user.username, suggested_tracks)
 
     assistant_msg = LyraMessage(id=str(uuid.uuid4()), user_id=user.id, role="assistant", content=response_text)

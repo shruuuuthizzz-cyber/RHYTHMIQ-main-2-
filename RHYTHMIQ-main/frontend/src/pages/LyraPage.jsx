@@ -11,6 +11,34 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
+const broadPlayRequestPattern = /\b(?:songs?|music|tracks?|playlist|mood|vibe|vibes|genre|artist|hindi|english|punjabi|tamil|telugu|malayalam|kannada|marathi|bengali|bangla|gujarati|korean|kpop|japanese|spanish|latin|romantic|romatic|sad|melancholic|chill|party|dance|workout|calm|focus|lofi|lo-fi|rock|rap|hip[\s-]?hop|bollywood|indie|acoustic)\b/i;
+
+const normalizeSearchText = (value = '') => value
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const isLikelyExactTrackMatch = (query, track) => {
+  const normalizedQuery = normalizeSearchText(query);
+  const normalizedTrackName = normalizeSearchText(track?.name || track?.track_name || '');
+  if (!normalizedQuery || !normalizedTrackName) {
+    return false;
+  }
+  if (normalizedTrackName === normalizedQuery) {
+    return true;
+  }
+
+  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
+  const trackTokens = normalizedTrackName.split(' ').filter(Boolean);
+  if (queryTokens.length === 0 || trackTokens.length === 0) {
+    return false;
+  }
+
+  const matchingTokens = queryTokens.filter((token) => trackTokens.includes(token));
+  return matchingTokens.length >= Math.max(queryTokens.length - 1, 1);
+};
+
 export default function LyraPage() {
   const { user } = useAuth();
   const { playTrack, setQueue, currentTrack, queue, isPlaying, progress, duration, volume, shuffle, repeat, setShuffle, setRepeat, togglePlay, playNext, playPrev, seekTo, setVolume, formatTime, requiresPlaybackGesture, startCurrentTrackAudio } = usePlayer();
@@ -94,7 +122,7 @@ export default function LyraPage() {
     const artistName = seedTrack?.artists?.map((artist) => artist.name).join(', ') || seedTrack?.artist_name || '';
 
     const [topTracksRes, recsRes] = await Promise.all([
-      artistId ? spotifyAPI.artistTopTracks(artistId).catch(() => null) : Promise.resolve(null),
+      artistId && !String(artistId).startsWith('yt_') ? spotifyAPI.artistTopTracks(artistId).catch(() => null) : Promise.resolve(null),
       spotifyAPI.recommendations({
         query: [seedTrack?.name || seedTrack?.track_name || '', artistName, 'songs like this'].filter(Boolean).join(' '),
         limit: 12,
@@ -128,6 +156,9 @@ export default function LyraPage() {
       }
 
       const selectedTrack = searchMatches[0];
+      if (!isLikelyExactTrackMatch(query, selectedTrack)) {
+        return false;
+      }
       const smartQueue = await buildQueueFromTrack(selectedTrack, searchMatches.slice(1));
       setQueue(smartQueue);
       playTrack(selectedTrack, smartQueue);
@@ -159,10 +190,11 @@ export default function LyraPage() {
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: text, id: createMessageId(), tracks: [] }]);
     const playMatch = text.match(/^(?:please\s+)?play\s+(.+)/i);
+    const shouldTreatAsExactTrackPlay = playMatch?.[1] && !broadPlayRequestPattern.test(playMatch[1]);
 
     setSending(true);
     try {
-      if (playMatch?.[1]) {
+      if (shouldTreatAsExactTrackPlay) {
         await playRequestedTrack(playMatch[1].trim());
         return;
       }

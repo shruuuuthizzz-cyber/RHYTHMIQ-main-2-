@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { usePlayer } from '@/lib/PlayerContext';
 import { adminAPI } from '@/lib/api';
@@ -12,6 +13,7 @@ import {
   Clock,
   Heart,
   LogIn,
+  LogOut,
   Mail,
   Music,
   Plus,
@@ -22,7 +24,8 @@ import {
 } from 'lucide-react';
 
 export default function AdminPage() {
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const { queue, setQueue } = usePlayer();
   const [users, setUsers] = useState([]);
   const [statistics, setStatistics] = useState([]);
@@ -261,6 +264,11 @@ export default function AdminPage() {
     return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
+  const handleSignOut = () => {
+    logout();
+    navigate('/admin/login', { replace: true });
+  };
+
   const renderRecommendationList = ({
     items,
     cardClassName,
@@ -338,10 +346,20 @@ export default function AdminPage() {
             Review user login IDs, liked songs, collaborative matches, and send recommendations.
           </p>
         </div>
-        <Button onClick={loadAdminData} variant="secondary" className="gap-2">
-          <Activity className="w-4 h-4" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-3 self-start md:self-auto">
+          <div className="text-right">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Signed in as</p>
+            <p className="text-sm font-medium">{user?.email}</p>
+          </div>
+          <Button onClick={loadAdminData} variant="secondary" className="gap-2">
+            <Activity className="w-4 h-4" />
+            Refresh
+          </Button>
+          <Button onClick={handleSignOut} variant="outline" className="gap-2 border-white/10 bg-white/5 hover:bg-white/10">
+            <LogOut className="w-4 h-4" />
+            Sign Out
+          </Button>
+        </div>
       </div>
 
       {error && (
