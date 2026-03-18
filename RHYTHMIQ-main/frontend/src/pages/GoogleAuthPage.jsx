@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { Music2, ArrowLeft, Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 
 const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -11,6 +10,7 @@ export default function GoogleAuthPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   const googleButtonRef = useRef(null);
   const { googleLogin } = useAuth();
   const navigate = useNavigate();
@@ -38,6 +38,9 @@ export default function GoogleAuthPage() {
         return;
       }
 
+      const containerWidth = googleButtonRef.current.parentElement?.offsetWidth || 320;
+      const buttonWidth = Math.min(containerWidth - 20, isMobile ? 280 : 400);
+
       window.google.accounts.id.initialize({
         client_id: googleClientId,
         callback: async (response) => {
@@ -61,7 +64,7 @@ export default function GoogleAuthPage() {
         size: 'large',
         text: 'signin_with',
         shape: 'pill',
-        width: 400,
+        width: buttonWidth,
       });
     };
 
@@ -80,7 +83,7 @@ export default function GoogleAuthPage() {
     return () => {
       script.onload = null;
     };
-  }, [googleLogin, isPreviewHost, navigate]);
+  }, [googleLogin, isPreviewHost, navigate, isMobile]);
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
@@ -97,53 +100,51 @@ export default function GoogleAuthPage() {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 w-full max-w-md mx-4"
+        className="relative z-10 w-full max-w-md mx-4 px-3 sm:px-4"
       >
-        <div className="flex items-center justify-between mb-8">
-          <Button
-            variant="ghost"
-            size="sm"
+        <div className="flex items-center justify-between mb-6 md:mb-8">
+          <button
             onClick={() => navigate('/auth')}
-            className="text-zinc-400 hover:text-white"
+            className="text-zinc-400 hover:text-white transition-colors p-1.5"
+            title="Back"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
-              <Music2 className="w-6 h-6 text-black" />
+            <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
+          </button>
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-primary flex items-center justify-center flex-shrink-0">
+              <Music2 className="w-5 h-5 md:w-6 md:h-6 text-black" />
             </div>
-            <span className="font-syne font-extrabold text-3xl tracking-tight">RHYTHMIQ</span>
+            <span className="font-syne font-extrabold text-2xl md:text-3xl tracking-tight">RHYTHMIQ</span>
           </div>
         </div>
 
-        <div className="rounded-[28px] border border-white/10 bg-black/60 backdrop-blur-xl p-8 shadow-2xl shadow-black/30">
-          <h1 className="font-syne font-extrabold text-4xl tracking-tight mb-2 text-center">
+        <div className="rounded-2xl md:rounded-[28px] border border-white/10 bg-black/60 backdrop-blur-xl p-5 md:p-8 shadow-2xl shadow-black/30">
+          <h1 className="font-syne font-extrabold text-2xl md:text-4xl tracking-tight mb-2 text-center">
             Sign in with Google
           </h1>
-          <p className="text-muted-foreground mb-8 text-center">
+          <p className="text-muted-foreground mb-6 md:mb-8 text-center text-sm md:text-base">
             Continue with your Google account to access RHYTHMIQ
           </p>
 
           {error && (
-            <div className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-              <p className="text-sm text-red-400">{error}</p>
+            <div className="mb-6 p-3 md:p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+              <p className="text-xs md:text-sm text-red-400">{error}</p>
             </div>
           )}
 
           {message && (
-            <div className="mb-6 p-4 rounded-lg bg-green-500/10 border border-green-500/20">
-              <p className="text-sm text-green-400">{message}</p>
+            <div className="mb-6 p-3 md:p-4 rounded-lg bg-green-500/10 border border-green-500/20">
+              <p className="text-xs md:text-sm text-green-400">{message}</p>
             </div>
           )}
 
           <div className="mb-6">
-            <p className="text-sm uppercase tracking-[0.22em] text-zinc-500 mb-4 text-center">Sign in with</p>
+            <p className="text-xs md:text-sm uppercase tracking-[0.22em] text-zinc-500 mb-4 text-center">Sign in with</p>
             {canUseGoogleLogin ? (
               <div ref={googleButtonRef} className="flex justify-center" />
             ) : (
-              <div className="text-center p-6 rounded-lg bg-white/5 border border-white/10">
-                <p className="text-sm text-zinc-400 mb-2">
+              <div className="text-center p-4 md:p-6 rounded-lg bg-white/5 border border-white/10">
+                <p className="text-xs md:text-sm text-zinc-400 mb-2">
                   {isPreviewHost ? 'Google login is disabled on preview links' : 'Google login not configured'}
                 </p>
                 <p className="text-xs text-zinc-500">
@@ -155,10 +156,10 @@ export default function GoogleAuthPage() {
             )}
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-primary mt-0.5" />
-              <div className="text-sm text-zinc-300 leading-6">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 md:p-4">
+            <div className="flex items-start gap-2 md:gap-3">
+              <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-primary mt-0.5 flex-shrink-0" />
+              <div className="text-xs md:text-sm text-zinc-300 leading-6">
                 By signing in, you'll get access to personalized music recommendations,
                 playlist creation, and your listening history across all your devices.
               </div>

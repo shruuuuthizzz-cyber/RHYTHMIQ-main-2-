@@ -17,6 +17,7 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   const googleButtonRef = useRef(null);
   const { login, register, googleLogin } = useAuth();
   const navigate = useNavigate();
@@ -33,6 +34,9 @@ export default function AuthPage() {
       if (!window.google?.accounts?.id || !googleButtonRef.current) {
         return;
       }
+
+      const containerWidth = googleButtonRef.current.parentElement?.offsetWidth || 320;
+      const buttonWidth = Math.min(containerWidth - 20, isMobile ? 280 : 360);
 
       window.google.accounts.id.initialize({
         client_id: googleClientId,
@@ -57,7 +61,7 @@ export default function AuthPage() {
         size: 'large',
         text: 'continue_with',
         shape: 'pill',
-        width: 360,
+        width: buttonWidth,
       });
     };
 
@@ -76,7 +80,7 @@ export default function AuthPage() {
     return () => {
       script.onload = null;
     };
-  }, [canUseGoogleLogin, googleLogin, navigate]);
+  }, [canUseGoogleLogin, googleLogin, navigate, isMobile]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -114,31 +118,31 @@ export default function AuthPage() {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-10 w-full max-w-md mx-4"
+        className="relative z-10 w-full max-w-md mx-4 px-3 sm:px-4"
       >
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
-            <Music2 className="w-6 h-6 text-black" />
+        <div className="flex items-center gap-2 md:gap-3 mb-6 md:mb-8 flex-col sm:flex-row">
+          <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-primary flex items-center justify-center flex-shrink-0">
+            <Music2 className="w-5 h-5 md:w-6 md:h-6 text-black" />
           </div>
-          <span className="font-syne font-extrabold text-3xl tracking-tight">RHYTHMIQ</span>
+          <span className="font-syne font-extrabold text-2xl md:text-3xl tracking-tight text-center sm:text-left">RHYTHMIQ</span>
         </div>
 
-        <div className="rounded-[28px] border border-white/10 bg-black/60 backdrop-blur-xl p-7 shadow-2xl shadow-black/30">
-          <h1 className="font-syne font-extrabold text-4xl tracking-tight mb-2">
+        <div className="rounded-2xl md:rounded-[28px] border border-white/10 bg-black/60 backdrop-blur-xl p-5 md:p-7 shadow-2xl shadow-black/30">
+          <h1 className="font-syne font-extrabold text-2xl md:text-4xl tracking-tight mb-2">
             {mode === 'login' ? 'Sign in to your vibe' : 'Start your sound identity'}
           </h1>
-          <p className="text-muted-foreground mb-6">
+          <p className="text-muted-foreground mb-6 text-sm md:text-base">
             Spotify-style discovery, YouTube-backed playback, and a Music DNA that evolves with every song.
           </p>
 
           {canUseGoogleLogin ? (
             <div className="mb-6">
-              <p className="text-sm uppercase tracking-[0.22em] text-zinc-500 mb-3">Quickest way in</p>
+              <p className="text-xs md:text-sm uppercase tracking-[0.22em] text-zinc-500 mb-3">Quickest way in</p>
               <div ref={googleButtonRef} className="flex justify-center mb-3" />
               <div className="text-center">
                 <button
                   onClick={() => navigate('/auth/google')}
-                  className="text-sm text-primary hover:underline"
+                  className="text-xs md:text-sm text-primary hover:underline"
                 >
                   Use dedicated Google login page ->
                 </button>
@@ -146,68 +150,68 @@ export default function AuthPage() {
             </div>
           ) : isPreviewHost ? (
             <div className="mb-6">
-              <p className="text-sm uppercase tracking-[0.22em] text-zinc-500 mb-3">Google Login</p>
-              <div className="text-center p-4 rounded-2xl border border-amber-500/20 bg-amber-500/10">
-                <p className="text-sm text-amber-200 mb-1">Google sign-in is disabled on this temporary preview link.</p>
+              <p className="text-xs md:text-sm uppercase tracking-[0.22em] text-zinc-500 mb-3">Google Login</p>
+              <div className="text-center p-3 md:p-4 rounded-2xl border border-amber-500/20 bg-amber-500/10">
+                <p className="text-xs md:text-sm text-amber-200 mb-1">Google sign-in is disabled on this temporary preview link.</p>
                 <p className="text-xs text-amber-100/80">Use email/password here, or use a Google-authorized origin in Google Cloud Console.</p>
               </div>
             </div>
           ) : (
             <div className="mb-6">
-              <p className="text-sm uppercase tracking-[0.22em] text-zinc-500 mb-3">Google Login</p>
+              <p className="text-xs md:text-sm uppercase tracking-[0.22em] text-zinc-500 mb-3">Google Login</p>
               <div className="text-center">
-                <p className="text-xs text-zinc-400 mb-2">To enable Google login:</p>
+                <p className="text-xs md:text-sm text-zinc-400 mb-2">To enable Google login:</p>
                 <p className="text-xs text-zinc-500">Add REACT_APP_GOOGLE_CLIENT_ID to frontend/.env</p>
               </div>
             </div>
           )}
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 mb-6">
-            <div className="flex items-start gap-3">
-              <Sparkles className="w-5 h-5 text-primary mt-0.5" />
-              <div className="text-sm text-zinc-300 leading-6">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 md:p-4 mb-6">
+            <div className="flex items-start gap-2 md:gap-3">
+              <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-primary mt-0.5 flex-shrink-0" />
+              <div className="text-xs md:text-sm text-zinc-300 leading-6">
                 First sign-in sends a welcome email. After that, Brevo is used for a monthly RHYTHMIQ wrap based on what you actually listened to.
               </div>
             </div>
           </div>
 
-          <div className="relative my-5">
+          <div className="relative my-4 md:my-5">
             <div className="h-px bg-white/10" />
             <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#070707] px-3 text-xs uppercase tracking-[0.24em] text-zinc-500">
               Or use email
             </span>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3 md:space-y-4">
             {mode === 'register' && (
               <div>
-                <label className="text-sm font-medium text-zinc-400 mb-1 block">Username</label>
+                <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Username</label>
                 <Input
                   data-testid="auth-username-input"
                   placeholder="your_vibe"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="bg-white/5 border-white/10 h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50"
+                  className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
                   required
                 />
               </div>
             )}
 
             <div>
-              <label className="text-sm font-medium text-zinc-400 mb-1 block">Email</label>
+              <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Email</label>
               <Input
                 data-testid="auth-email-input"
                 type="email"
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="bg-white/5 border-white/10 h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50"
+                className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
                 required
               />
             </div>
 
             <div>
-              <label className="text-sm font-medium text-zinc-400 mb-1 block">Password</label>
+              <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Password</label>
               <div className="relative">
                 <Input
                   data-testid="auth-password-input"
@@ -215,24 +219,24 @@ export default function AuthPage() {
                   placeholder="Min 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="bg-white/5 border-white/10 h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 pr-12"
+                  className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 pr-10 md:pr-12 text-sm"
                   required
                   minLength={6}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors p-1"
                 >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  {showPassword ? <EyeOff className="w-4 h-4 md:w-5 md:h-5" /> : <Eye className="w-4 h-4 md:w-5 md:h-5" />}
                 </button>
               </div>
             </div>
 
-            {error && <p data-testid="auth-error" className="text-destructive text-sm">{error}</p>}
+            {error && <p data-testid="auth-error" className="text-destructive text-xs md:text-sm">{error}</p>}
             {message && (
-              <p className="text-emerald-300 text-sm inline-flex items-center gap-2">
-                <Mail className="w-4 h-4" />
+              <p className="text-emerald-300 text-xs md:text-sm inline-flex items-center gap-2">
+                <Mail className="w-3 h-3 md:w-4 md:h-4" />
                 <span>{message}</span>
               </p>
             )}
@@ -241,14 +245,14 @@ export default function AuthPage() {
               data-testid="auth-submit-btn"
               type="submit"
               disabled={loading}
-              className="w-full h-12 rounded-full bg-primary text-black font-bold text-base hover:opacity-90 transition-opacity duration-200"
+              className="w-full h-10 md:h-12 rounded-full bg-primary text-black font-bold text-sm md:text-base hover:opacity-90 transition-opacity duration-200"
             >
               {loading ? 'Loading...' : mode === 'login' ? 'Sign In' : 'Create Account'}
               <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </form>
 
-          <p className="text-sm text-zinc-500 mt-6 text-center">
+          <p className="text-xs md:text-sm text-zinc-500 mt-4 md:mt-6 text-center">
             {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
             <button
               data-testid="auth-toggle-mode"
@@ -259,11 +263,11 @@ export default function AuthPage() {
             </button>
           </p>
 
-          <div className="mt-6 pt-6 border-t border-white/10">
+          <div className="mt-4 md:mt-6 pt-4 md:pt-6 border-t border-white/10">
             <p className="text-xs text-zinc-600 text-center mb-3">Administrator Access?</p>
             <button
               onClick={() => navigate('/admin/login')}
-              className="w-full px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-colors duration-200 text-zinc-400 hover:text-zinc-300"
+              className="w-full px-3 md:px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs md:text-sm font-medium transition-colors duration-200 text-zinc-400 hover:text-zinc-300"
             >
               Admin Portal
             </button>
