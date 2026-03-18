@@ -2,3 +2,5 @@
 /node_modules/
 /package.json
 /package-lock.json
+/debug.log
+/gcm-diagnose.log
