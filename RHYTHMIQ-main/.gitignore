@@ -91,3 +91,8 @@ android-sdk/ frontend/node_modules/.cache/default-development/4.pack
 *.env
 *.env.*
 frontend/node_modules/.cache/default-development/0.pack
+
+# Local runtime artifacts
+logs/
+backend/.cache
+backend/Untitled-1.json
