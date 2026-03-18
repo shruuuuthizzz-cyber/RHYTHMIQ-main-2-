@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: rhythmiq
+    env: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/
+    autoDeploy: true
+    disk:
+      name: rhythmiq-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        value: sqlite:////var/data/rhythmiq.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REACT_APP_ADMIN_EMAILS
+        value: devangipradhan@rhythmiq.com,shruthishirgaonkar@rhythmiq.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: REACT_APP_GOOGLE_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        value: RHYTHMIQ
