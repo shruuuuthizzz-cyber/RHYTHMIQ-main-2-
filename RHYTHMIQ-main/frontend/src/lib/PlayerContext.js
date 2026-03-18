@@ -29,6 +29,7 @@ export const PlayerProvider = ({ children }) => {
   const progressRef = useRef(0);
   const durationRef = useRef(0);
   const listeningSessionRef = useRef(null);
+  const offlineObjectUrlRef = useRef(null);
 
   useEffect(() => {
     currentTrackRef.current = currentTrack;
@@ -91,9 +92,22 @@ export const PlayerProvider = ({ children }) => {
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
+    if (offlineObjectUrlRef.current) {
+      URL.revokeObjectURL(offlineObjectUrlRef.current);
+      offlineObjectUrlRef.current = null;
+    }
     setIsPlaying(false);
     setProgress(0);
   }, [flushListeningEvent]);
+
+  const closePlayer = useCallback(() => {
+    stopPlayback();
+    setCurrentTrack(null);
+    setQueue([]);
+    setQueueIndex(-1);
+    setDuration(0);
+    setRequiresPlaybackGesture(false);
+  }, [stopPlayback]);
 
   const resolveYouTubeVideo = useCallback(async (track) => {
     const trackName = track.name || track.track_name || '';
@@ -181,6 +195,23 @@ export const PlayerProvider = ({ children }) => {
     setProgress(0);
     setDuration(fallbackDuration);
     setRequiresPlaybackGesture(false);
+
+    if (track.offline_audio_blob instanceof Blob) {
+      if (offlineObjectUrlRef.current) {
+        URL.revokeObjectURL(offlineObjectUrlRef.current);
+      }
+
+      const offlineUrl = URL.createObjectURL(track.offline_audio_blob);
+      offlineObjectUrlRef.current = offlineUrl;
+      nextTrack.offline_audio_url = offlineUrl;
+      nextTrack.playback_mode = 'offline_download';
+      return startAudioPlayback(nextTrack, offlineUrl, fallbackDuration);
+    }
+
+    if (track.offline_audio_url) {
+      nextTrack.playback_mode = 'offline_download';
+      return startAudioPlayback(nextTrack, track.offline_audio_url, fallbackDuration);
+    }
 
     const youtubeMatch = track.youtube_video_id ? {
       video_id: track.youtube_video_id,
@@ -415,6 +446,7 @@ export const PlayerProvider = ({ children }) => {
       startCurrentTrackAudio,
       setQueue,
       setQueueIndex,
+      closePlayer,
     }}
     >
       {children}

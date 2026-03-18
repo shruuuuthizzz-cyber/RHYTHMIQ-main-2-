@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -2346,6 +2346,70 @@ async def youtube_audio_source(req: YouTubeAudioSourceRequest):
         return {"video_id": match["video_id"], "stream_url": None}
 
     return audio_source
+
+
+@api_router.get("/youtube/download")
+async def youtube_download(
+    video_id: Optional[str] = None,
+    track_name: Optional[str] = None,
+    artist_name: Optional[str] = None,
+):
+    match = None
+
+    if video_id:
+        match = {"video_id": video_id, "title": track_name or "RHYTHMIQ Track"}
+    else:
+        if not track_name:
+            raise HTTPException(status_code=400, detail="track_name or video_id is required")
+        match = await search_youtube_video(track_name, artist_name)
+
+    if not match or not match.get("video_id"):
+        raise HTTPException(status_code=404, detail="Unable to resolve a downloadable audio source")
+
+    audio_source = await get_youtube_audio_source(match["video_id"])
+    stream_url = audio_source.get("stream_url") if audio_source else None
+    if not stream_url:
+        raise HTTPException(status_code=404, detail="Audio stream is unavailable for this track")
+
+    try:
+        upstream = requests.get(
+            stream_url,
+            stream=True,
+            timeout=30,
+            headers={"User-Agent": "Mozilla/5.0 RHYTHMIQ Downloader"},
+        )
+        upstream.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail="Failed to fetch downloadable audio") from exc
+
+    content_type = upstream.headers.get("Content-Type", "audio/mpeg")
+    file_ext = "mp3"
+    lowered_content_type = content_type.lower()
+    if "webm" in lowered_content_type:
+        file_ext = "webm"
+    elif "mp4" in lowered_content_type or "m4a" in lowered_content_type or "aac" in lowered_content_type:
+        file_ext = "m4a"
+
+    safe_track_name = re.sub(r'[^a-zA-Z0-9._ -]+', '', (track_name or match.get("title") or "RHYTHMIQ Track")).strip() or "RHYTHMIQ Track"
+    safe_artist_name = re.sub(r'[^a-zA-Z0-9._ -]+', '', (artist_name or "")).strip()
+    filename = f"{safe_track_name} - {safe_artist_name}.{file_ext}" if safe_artist_name else f"{safe_track_name}.{file_ext}"
+
+    def iter_audio_stream():
+        try:
+            for chunk in upstream.iter_content(chunk_size=1024 * 64):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    return StreamingResponse(
+        iter_audio_stream(),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 # ─── Time-of-Day Suggestions ───
 

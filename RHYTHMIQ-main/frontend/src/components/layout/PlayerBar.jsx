@@ -1,8 +1,10 @@
 import React from 'react';
 import { usePlayer } from '@/lib/PlayerContext';
-import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Heart, Plus, Download, List, Maximize2, Minimize2 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Volume2, VolumeX, Heart, Plus, Download, List, Maximize2, Minimize2, X, Check } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
-import { likesAPI, playlistAPI } from '@/lib/api';
+import { buildApiUrl, likesAPI, playlistAPI } from '@/lib/api';
+import { getOfflineDownloadForTrack, OFFLINE_DOWNLOADS_UPDATED_EVENT, saveOfflineDownload } from '@/lib/offlineDownloads';
+import { toast } from '@/components/ui/sonner';
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -12,13 +14,17 @@ export const PlayerBar = () => {
   const {
     currentTrack, isPlaying, progress, duration, volume, shuffle, repeat,
     togglePlay, playTrack, playNext, playPrev, seekTo, setVolume, setShuffle, setRepeat, formatTime,
-    requiresPlaybackGesture, startCurrentTrackAudio, queue
+    requiresPlaybackGesture, startCurrentTrackAudio, queue, closePlayer
   } = usePlayer();
   const [liked, setLiked] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [playlists, setPlaylists] = useState([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [playlistBusy, setPlaylistBusy] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState('idle');
   const [showMiniBar, setShowMiniBar] = useState(true);
 
   useEffect(() => {
@@ -27,6 +33,49 @@ export const PlayerBar = () => {
       setShowMiniBar(true);
     }
   }, [currentTrack?.id]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const syncDownloadState = async () => {
+      if (!currentTrack) {
+        if (isActive) {
+          setDownloadStatus('idle');
+        }
+        return;
+      }
+
+      try {
+        const existingDownload = await getOfflineDownloadForTrack(currentTrack);
+        if (isActive) {
+          setDownloadStatus(existingDownload ? 'downloaded' : 'idle');
+        }
+      } catch (error) {
+        if (isActive) {
+          setDownloadStatus('idle');
+        }
+      }
+    };
+
+    const handleDownloadsChanged = () => {
+      void syncDownloadState();
+    };
+
+    void syncDownloadState();
+    window.addEventListener(OFFLINE_DOWNLOADS_UPDATED_EVENT, handleDownloadsChanged);
+
+    return () => {
+      isActive = false;
+      window.removeEventListener(OFFLINE_DOWNLOADS_UPDATED_EVENT, handleDownloadsChanged);
+    };
+  }, [
+    currentTrack?.id,
+    currentTrack?.spotify_track_id,
+    currentTrack?.youtube_video_id,
+    currentTrack?.name,
+    currentTrack?.track_name,
+    currentTrack?.artist_name,
+  ]);
 
   const handleLike = async () => {
     if (!currentTrack) return;
@@ -54,6 +103,7 @@ export const PlayerBar = () => {
     if (!currentTrack) return;
 
     try {
+      setPlaylistBusy(true);
       await playlistAPI.addSong(playlistId, {
         spotify_track_id: currentTrack.id,
         track_name: currentTrack.name || currentTrack.track_name,
@@ -63,43 +113,112 @@ export const PlayerBar = () => {
         duration_ms: currentTrack.duration_ms,
         preview_url: currentTrack.preview_url,
       });
+      setCreateDialogOpen(false);
     } catch (e) {
       console.error('Add to playlist error', e);
+    } finally {
+      setPlaylistBusy(false);
     }
+  };
+
+  const loadPlaylists = async () => {
+    try {
+      setLoadingPlaylists(true);
+      const res = await playlistAPI.getAll();
+      setPlaylists(res.data || []);
+    } catch (e) {
+      console.error('Load playlists error', e);
+      setPlaylists([]);
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  };
+
+  const openPlaylistDialog = async () => {
+    setCreateDialogOpen(true);
+    await loadPlaylists();
   };
 
   const createPlaylist = async () => {
     if (!newPlaylistName.trim()) return;
     try {
+      setPlaylistBusy(true);
       const res = await playlistAPI.create({ name: newPlaylistName.trim() });
       setNewPlaylistName('');
-      setCreateDialogOpen(false);
       if (res.data?.id) {
         await addCurrentTrackToPlaylist(res.data.id);
+        await loadPlaylists();
       }
     } catch (e) {
       console.error('Create playlist error', e);
+    } finally {
+      setPlaylistBusy(false);
     }
   };
 
-  const downloadTrack = () => {
-    if (!currentTrack) return;
-    
-    // Try to download the preview URL if available
-    const downloadUrl = currentTrack.preview_url || currentTrack.external_urls?.spotify;
-    
-    if (downloadUrl) {
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `${currentTrack.name || currentTrack.track_name} - ${currentTrack.artists?.map(a => a.name).join(', ') || currentTrack.artist_name}.mp3`;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      // Fallback: open in new tab
-      window.open(`https://www.youtube.com/search?q=${encodeURIComponent((currentTrack.name || currentTrack.track_name) + ' ' + (currentTrack.artists?.map(a => a.name).join(' ') || currentTrack.artist_name))}`, '_blank');
+  const downloadTrack = async () => {
+    if (!currentTrack || downloadStatus === 'downloading' || downloadStatus === 'downloaded') return;
+
+    const trackLabel = currentTrack.name || currentTrack.track_name || 'RHYTHMIQ Track';
+    const artistLabel = currentTrack.artists?.map(a => a.name).join(', ') || currentTrack.artist_name || '';
+    const params = new URLSearchParams();
+    const token = localStorage.getItem('rhythmiq_token');
+    if (currentTrack.youtube_video_id) {
+      params.set('video_id', currentTrack.youtube_video_id);
     }
+    params.set('track_name', trackLabel);
+    if (artistLabel) {
+      params.set('artist_name', artistLabel);
+    }
+    if (token) {
+      params.set('authorization', `Bearer ${token}`);
+    }
+
+    try {
+      setDownloadStatus('downloading');
+      const response = await fetch(buildApiUrl(`/youtube/download?${params.toString()}`));
+      if (!response.ok) {
+        let detail = 'Download request failed';
+        const responseType = response.headers.get('content-type') || '';
+        if (responseType.includes('application/json')) {
+          const payload = await response.json().catch(() => null);
+          detail = payload?.detail || detail;
+        }
+        throw new Error(detail);
+      }
+
+      const blob = await response.blob();
+      if (!(blob instanceof Blob) || blob.size === 0) {
+        throw new Error('Downloaded audio file was empty');
+      }
+
+      const contentDisposition = response.headers.get('content-disposition') || '';
+      const matchedFilename = contentDisposition.match(/filename="([^"]+)"/i);
+      const resolvedFilename = matchedFilename?.[1] || `${trackLabel}${artistLabel ? ` - ${artistLabel}` : ''}.mp3`;
+      const savedRecord = await saveOfflineDownload({
+        track: currentTrack,
+        audioBlob: blob,
+        filename: resolvedFilename,
+        contentType: blob.type || response.headers.get('content-type') || 'audio/mpeg',
+      });
+
+      toast.success('Saved for offline playback', {
+        description: `${savedRecord.track_name} is now in ${savedRecord.storage_location}.`,
+      });
+      setDownloadStatus('downloaded');
+    } catch (error) {
+      console.error('Download error', error);
+      setDownloadStatus('idle');
+      toast.error('Offline save failed', {
+        description: error?.message || 'We could not prepare this song for offline playback.',
+      });
+    }
+  };
+
+  const handleCloseMiniBar = () => {
+    setFullScreen(false);
+    setShowMiniBar(false);
+    closePlayer();
   };
 
   if (!currentTrack || !showMiniBar) {
@@ -112,6 +231,10 @@ export const PlayerBar = () => {
   const playbackMode = currentTrack.playback_mode || null;
   const hasPreview = playbackMode === 'spotify_preview';
   const hasYouTubeFallback = playbackMode === 'youtube_audio';
+  const isDownloading = downloadStatus === 'downloading';
+  const isDownloaded = downloadStatus === 'downloaded';
+  const downloadButtonLabel = isDownloading ? 'Downloading...' : isDownloaded ? 'Downloaded' : 'Download';
+  const downloadButtonTitle = isDownloading ? 'Downloading for offline playback...' : isDownloaded ? 'Already saved in Library > Downloaded Songs' : 'Download for offline playback';
 
   return (
     <>
@@ -140,18 +263,19 @@ export const PlayerBar = () => {
               <Heart className={`w-4 h-4 transition-colors duration-200 ${liked ? 'fill-primary text-primary' : 'text-zinc-400 hover:text-white'}`} />
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); setCreateDialogOpen(true); }}
+              onClick={(e) => { e.stopPropagation(); void openPlaylistDialog(); }}
               className="ml-2 flex-shrink-0 text-zinc-400 hover:text-white transition-colors duration-200"
               title="Add to Playlist"
             >
               <Plus className="w-4 h-4" />
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); downloadTrack(); }}
-              className="ml-2 flex-shrink-0 text-zinc-400 hover:text-white transition-colors duration-200"
-              title="Download"
+              onClick={(e) => { e.stopPropagation(); void downloadTrack(); }}
+              disabled={isDownloading}
+              className={`ml-2 flex-shrink-0 transition-colors duration-200 disabled:opacity-50 ${isDownloaded ? 'text-emerald-300 hover:text-emerald-200' : 'text-zinc-400 hover:text-white'}`}
+              title={downloadButtonTitle}
             >
-              <Download className="w-4 h-4" />
+              {isDownloaded ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4" />}
             </button>
             {hasYouTubeFallback && (
               <span className="ml-2 text-[10px] text-red-300 bg-red-500/10 px-2 py-0.5 rounded-full">YouTube Audio</span>
@@ -227,6 +351,13 @@ export const PlayerBar = () => {
             >
               <Maximize2 className="w-4 h-4" />
             </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleCloseMiniBar(); }}
+              className="text-zinc-400 hover:text-white transition-colors duration-200"
+              title="Close player"
+            >
+              <X className="w-4 h-4" />
+            </button>
             <button onClick={(e) => { e.stopPropagation(); setVolume(volume === 0 ? 0.7 : 0); }} className="text-zinc-400 hover:text-white transition-colors duration-200">
               {volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
@@ -244,7 +375,7 @@ export const PlayerBar = () => {
 
       {/* Full Screen Player */}
       <Dialog open={fullScreen} onOpenChange={setFullScreen}>
-        <DialogContent className="m-0 h-full w-full max-w-none rounded-none p-0">
+        <DialogContent hideClose className="m-0 h-full w-full max-w-none rounded-none p-0">
           <div className="h-full flex flex-col bg-black overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-white/10">
               <div>
@@ -290,11 +421,20 @@ export const PlayerBar = () => {
                   </button>
 
                   <button
-                    onClick={downloadTrack}
+                    onClick={() => { void openPlaylistDialog(); }}
                     className="flex items-center gap-2 rounded-full bg-white/5 px-4 py-2 text-sm font-medium text-white hover:bg-white/10"
                   >
-                    <Download className="w-4 h-4" />
-                    Download
+                    <Plus className="w-4 h-4" />
+                    Playlist
+                  </button>
+
+                  <button
+                    onClick={() => { void downloadTrack(); }}
+                    disabled={isDownloading}
+                    className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium disabled:opacity-50 ${isDownloaded ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/20' : 'bg-white/5 text-white hover:bg-white/10'}`}
+                  >
+                    {isDownloaded ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+                    {downloadButtonLabel}
                   </button>
                 </div>
 
@@ -375,19 +515,53 @@ export const PlayerBar = () => {
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent className="bg-card border-white/10">
             <DialogHeader>
-              <DialogTitle className="font-syne">Create Playlist</DialogTitle>
+              <DialogTitle className="font-syne">Add to Playlist</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Create new playlist</p>
               <Input
                 placeholder="Playlist name"
                 value={newPlaylistName}
                 onChange={(e) => setNewPlaylistName(e.target.value)}
                 className="bg-white/5 border-white/10"
-                onKeyDown={(e) => e.key === 'Enter' && createPlaylist()}
+                onKeyDown={(e) => e.key === 'Enter' && !playlistBusy && createPlaylist()}
               />
-              <Button onClick={createPlaylist} className="w-full rounded-full bg-primary text-black font-bold">
+              <Button onClick={createPlaylist} disabled={playlistBusy || !newPlaylistName.trim()} className="w-full rounded-full bg-primary text-black font-bold">
                 Create and Add Current Track
               </Button>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Or add to existing playlist</p>
+                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {loadingPlaylists ? (
+                    <p className="text-sm text-muted-foreground">Loading playlists...</p>
+                  ) : playlists.length > 0 ? (
+                    playlists.map((playlist) => (
+                      <button
+                        key={playlist.id}
+                        type="button"
+                        disabled={playlistBusy}
+                        onClick={() => addCurrentTrackToPlaylist(playlist.id)}
+                        className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left transition-colors hover:bg-white/10 disabled:opacity-60"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{playlist.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {playlist.song_count || 0} songs
+                            </p>
+                          </div>
+                          <Plus className="w-4 h-4 text-zinc-400" />
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No playlists yet. Create your first one above.</p>
+                  )}
+                </div>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

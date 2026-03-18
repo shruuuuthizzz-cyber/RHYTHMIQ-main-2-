@@ -50,6 +50,9 @@ export default function LyraPage() {
   const [liked, setLiked] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [playlists, setPlaylists] = useState([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [playlistBusy, setPlaylistBusy] = useState(false);
   const bottomRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -223,6 +226,7 @@ export default function LyraPage() {
     if (!currentTrack) return;
 
     try {
+      setPlaylistBusy(true);
       await playlistAPI.addSong(playlistId, {
         spotify_track_id: currentTrack.id,
         track_name: currentTrack.name || currentTrack.track_name,
@@ -232,22 +236,46 @@ export default function LyraPage() {
         duration_ms: currentTrack.duration_ms,
         preview_url: currentTrack.preview_url,
       });
+      setCreateDialogOpen(false);
     } catch (e) {
       console.error('Add to playlist error', e);
+    } finally {
+      setPlaylistBusy(false);
     }
+  };
+
+  const loadPlaylists = async () => {
+    try {
+      setLoadingPlaylists(true);
+      const res = await playlistAPI.getAll();
+      setPlaylists(res.data || []);
+    } catch (e) {
+      console.error('Load playlists error', e);
+      setPlaylists([]);
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  };
+
+  const openPlaylistDialog = async () => {
+    setCreateDialogOpen(true);
+    await loadPlaylists();
   };
 
   const createPlaylist = async () => {
     if (!newPlaylistName.trim()) return;
     try {
+      setPlaylistBusy(true);
       const res = await playlistAPI.create({ name: newPlaylistName.trim() });
       setNewPlaylistName('');
-      setCreateDialogOpen(false);
       if (res.data?.id) {
         await addCurrentTrackToPlaylist(res.data.id);
+        await loadPlaylists();
       }
     } catch (e) {
       console.error('Create playlist error', e);
+    } finally {
+      setPlaylistBusy(false);
     }
   };
 
@@ -452,7 +480,7 @@ export default function LyraPage() {
                 <Button
                   size="sm"
                   className="rounded-full bg-white/5 border-white/10 text-xs text-white hover:bg-white/10"
-                  onClick={() => setCreateDialogOpen(true)}
+                  onClick={openPlaylistDialog}
                 >
                   <Plus className="w-4 h-4 mr-1" />
                   Create Playlist
@@ -479,13 +507,20 @@ export default function LyraPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 justify-end">
+                  <button
+                    data-testid="lyra-like-btn"
+                    onClick={toggleLike}
+                    className="flex items-center gap-2 rounded-full bg-white/5 px-3 py-2 text-xs font-medium text-white hover:bg-white/10"
+                  >
+                    <Heart className={`w-4 h-4 ${liked ? 'fill-primary text-primary' : 'text-white'}`} />
+                    {liked ? 'Liked' : 'Like'}
+                  </button>
                     <button
-                      data-testid="lyra-like-btn"
-                      onClick={toggleLike}
+                      onClick={openPlaylistDialog}
                       className="flex items-center gap-2 rounded-full bg-white/5 px-3 py-2 text-xs font-medium text-white hover:bg-white/10"
                     >
-                      <Heart className={`w-4 h-4 ${liked ? 'fill-primary text-primary' : 'text-white'}`} />
-                      {liked ? 'Liked' : 'Like'}
+                      <Plus className="w-4 h-4" />
+                      Playlist
                     </button>
                   </div>
                 </div>
@@ -596,20 +631,51 @@ export default function LyraPage() {
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent className="bg-card border-white/10">
             <DialogHeader>
-              <DialogTitle className="font-syne">Create Playlist</DialogTitle>
+              <DialogTitle className="font-syne">Add to Playlist</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Create new playlist</p>
               <Input
                 data-testid="new-playlist-name"
                 placeholder="Playlist name"
                 value={newPlaylistName}
                 onChange={(e) => setNewPlaylistName(e.target.value)}
                 className="bg-white/5 border-white/10"
-                onKeyDown={(e) => e.key === 'Enter' && createPlaylist()}
+                onKeyDown={(e) => e.key === 'Enter' && !playlistBusy && createPlaylist()}
               />
-              <Button data-testid="save-playlist-btn" onClick={createPlaylist} className="w-full rounded-full bg-primary text-black font-bold">
+              <Button data-testid="save-playlist-btn" disabled={playlistBusy || !newPlaylistName.trim()} onClick={createPlaylist} className="w-full rounded-full bg-primary text-black font-bold">
                 Create and Add Current Track
               </Button>
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">Or add to existing playlist</p>
+                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                  {loadingPlaylists ? (
+                    <p className="text-sm text-muted-foreground">Loading playlists...</p>
+                  ) : playlists.length > 0 ? (
+                    playlists.map((playlist) => (
+                      <button
+                        key={playlist.id}
+                        type="button"
+                        disabled={playlistBusy}
+                        onClick={() => addCurrentTrackToPlaylist(playlist.id)}
+                        className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left transition-colors hover:bg-white/10 disabled:opacity-60"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{playlist.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{playlist.song_count || 0} songs</p>
+                          </div>
+                          <Plus className="w-4 h-4 text-zinc-400" />
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No playlists yet. Create your first one above.</p>
+                  )}
+                </div>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

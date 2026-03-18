@@ -12,6 +12,8 @@ const backendUrl = process.env.REACT_APP_BACKEND_URL || (
 const API_BASE = `${backendUrl}/api`;
 const adminMode = process.env.REACT_APP_ADMIN_MODE === 'true';
 
+export const buildApiUrl = (path) => `${API_BASE}${path}`;
+
 const api = axios.create({ baseURL: API_BASE });
 
 api.interceptors.request.use((config) => {
