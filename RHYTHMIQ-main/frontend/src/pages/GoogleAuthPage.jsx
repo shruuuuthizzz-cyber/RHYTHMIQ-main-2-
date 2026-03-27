@@ -10,6 +10,7 @@ export default function GoogleAuthPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   const googleButtonRef = useRef(null);
   const { googleLogin } = useAuth();
@@ -46,15 +47,19 @@ export default function GoogleAuthPage() {
         callback: async (response) => {
           setError('');
           setMessage('');
-          setLoading(true);
+          setGoogleLoading(true);
           try {
             await googleLogin(response.credential);
-            navigate('/');
+            setMessage('Sign in successful! Redirecting...');
+            setTimeout(() => navigate('/'), 1500);
           } catch (err) {
-            setError(err.response?.data?.detail || 'Google login failed. Please try again.');
-          } finally {
-            setLoading(false);
+            setError(err.response?.data?.detail || err.message || 'Google login failed. Please try again.');
+            setGoogleLoading(false);
           }
+        },
+        error_callback: () => {
+          setError('Google login error. Please try again or use email login instead.');
+          setGoogleLoading(false);
         },
       });
 

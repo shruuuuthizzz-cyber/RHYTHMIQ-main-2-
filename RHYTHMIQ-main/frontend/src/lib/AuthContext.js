@@ -43,10 +43,7 @@ export const AuthProvider = ({ children }) => {
 
   const register = useCallback(async (username, email, password) => {
     const res = await authAPI.register({ username, email, password });
-    localStorage.setItem('rhythmiq_token', res.data.token);
-    localStorage.setItem('rhythmiq_user', JSON.stringify(res.data.user));
-    setToken(res.data.token);
-    setUser(res.data.user);
+    // Do NOT auto-authenticate after registration. User must sign in.
     return res.data;
   }, []);
 

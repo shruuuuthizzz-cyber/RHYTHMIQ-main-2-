@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/sonner';
+import { parseErrorDetail } from '@/lib/utils';
 import {
   Activity,
   Clock,
@@ -142,7 +143,8 @@ export default function AdminPage() {
       setSelectedUserId((current) => current || firstNonAdminWithTaste?.id || firstNonAdmin?.id || nextStats[0]?.id || null);
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.detail || 'Failed to load admin dashboard');
+      const errorMsg = parseErrorDetail(err.response?.data?.detail) || 'Failed to load admin dashboard';
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

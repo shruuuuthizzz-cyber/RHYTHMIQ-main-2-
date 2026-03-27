@@ -1,22 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { authAPI } from '@/lib/api';
 import { Music2, ArrowRight, Sparkles, Mail, Eye, EyeOff } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { motion } from 'framer-motion';
+import { parseErrorDetail } from '@/lib/utils';
 
 const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 
 export default function AuthPage() {
   const [mode, setMode] = useState('login');
+  const [identifier, setIdentifier] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   const googleButtonRef = useRef(null);
   const { login, register, googleLogin } = useAuth();
@@ -24,6 +36,21 @@ export default function AuthPage() {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const isPreviewHost = ['loca.lt', 'localtunnel.me', 'trycloudflare.com'].some((domain) => hostname.endsWith(domain));
   const canUseGoogleLogin = Boolean(googleClientId) && !isPreviewHost;
+
+  // Load saved credentials on mount
+  useEffect(() => {
+    const savedCredentials = localStorage.getItem('rhythmiq_remembered_credentials');
+    if (savedCredentials) {
+      try {
+        const { email: savedEmail, rememberMe: saved } = JSON.parse(savedCredentials);
+        setIdentifier(savedEmail);
+        setEmail(savedEmail);
+        setRememberMe(saved);
+      } catch (e) {
+        console.error('Error loading saved credentials:', e);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!canUseGoogleLogin || !googleButtonRef.current) {
@@ -43,15 +70,20 @@ export default function AuthPage() {
         callback: async (response) => {
           setError('');
           setMessage('');
-          setLoading(true);
+          setGoogleLoading(true);
           try {
             await googleLogin(response.credential);
-            navigate('/');
+            setMessage('Sign in successful! Redirecting...');
+            setTimeout(() => navigate('/'), 1500);
           } catch (err) {
-            setError(err.response?.data?.detail || 'Google login failed.');
-          } finally {
-            setLoading(false);
+            const errorMsg = parseErrorDetail(err.response?.data?.detail) || err.message || 'Google login failed. Please try again.';
+            setError(errorMsg);
+            setGoogleLoading(false);
           }
+        },
+        error_callback: () => {
+          setError('Google login error. Please try again.');
+          setGoogleLoading(false);
         },
       });
 
@@ -89,15 +121,76 @@ export default function AuthPage() {
     setLoading(true);
     try {
       if (mode === 'login') {
-        await login(email, password);
-        setMessage('Signed in. Your listening profile is ready.');
+        await login(identifier, password);
+        // Save credentials if remember me is checked
+        if (rememberMe) {
+          localStorage.setItem('rhythmiq_remembered_credentials', JSON.stringify({
+            email: identifier,
+            rememberMe: true,
+          }));
+        } else {
+          localStorage.removeItem('rhythmiq_remembered_credentials');
+        }
+        setMessage('Signed in. Your listening profile is ready. Redirecting...');
+        setTimeout(() => navigate('/'), 1500);
       } else {
         await register(username, email, password);
-        setMessage('Account created. Check your inbox for the RHYTHMIQ welcome email.');
+        // Keep user on register to confirm. Do not auto-login.
+        setMessage('Account created successfully! Please sign in with your credentials.');
+        setMode('login');
       }
-      navigate('/');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Something went wrong');
+      const status = err.response?.status;
+      if (status === 401) {
+        setError('Invalid credentials. Please check your email/username and password.');
+      } else {
+        const errorMsg = parseErrorDetail(err.response?.data?.detail) || err.message || 'Something went wrong.';
+        setError(errorMsg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+    setLoading(true);
+    try {
+      const response = await authAPI.forgotPassword({ email: forgotEmail });
+      setMessage(response.data?.detail || 'OTP sent to your email. Please check your inbox.');
+      setResetEmail(forgotEmail);
+      setShowForgotPassword(false);
+      setShowResetPassword(true);
+    } catch (err) {
+      const errorMsg = parseErrorDetail(err.response?.data?.detail) || err.message || 'Error sending password reset instructions.';
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+    setLoading(true);
+    try {
+      const response = await authAPI.resetPassword({ 
+        email: resetEmail, 
+        otp: otp, 
+        new_password: newPassword 
+      });
+      setMessage(response.data?.detail || 'Password reset successfully! You can now sign in with your new password.');
+      setShowResetPassword(false);
+      setMode('login');
+      setOtp('');
+      setNewPassword('');
+      setResetEmail('');
+    } catch (err) {
+      const errorMsg = parseErrorDetail(err.response?.data?.detail) || err.message || 'Error resetting password.';
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -183,32 +276,46 @@ export default function AuthPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3 md:space-y-4">
-            {mode === 'register' && (
+            {mode === 'register' ? (
+              <>
+                <div>
+                  <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Username</label>
+                  <Input
+                    data-testid="auth-username-input"
+                    placeholder="your_vibe"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Email</label>
+                  <Input
+                    data-testid="auth-email-input"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
+                    required
+                  />
+                </div>
+              </>
+            ) : (
               <div>
-                <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Username</label>
+                <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Username or Email</label>
                 <Input
-                  data-testid="auth-username-input"
-                  placeholder="your_vibe"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  data-testid="auth-identifier-input"
+                  placeholder="username or email"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
                   required
                 />
               </div>
             )}
-
-            <div>
-              <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Email</label>
-              <Input
-                data-testid="auth-email-input"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
-                required
-              />
-            </div>
 
             <div>
               <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">Password</label>
@@ -233,6 +340,20 @@ export default function AuthPage() {
               </div>
             </div>
 
+            {mode === 'login' && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="remember-me"
+                  checked={rememberMe}
+                  onCheckedChange={setRememberMe}
+                  className="border-white/20"
+                />
+                <label htmlFor="remember-me" className="text-xs md:text-sm font-medium text-zinc-400 cursor-pointer">
+                  Remember my email for next time
+                </label>
+              </div>
+            )}
+
             {error && <p data-testid="auth-error" className="text-destructive text-xs md:text-sm">{error}</p>}
             {message && (
               <p className="text-emerald-300 text-xs md:text-sm inline-flex items-center gap-2">
@@ -252,26 +373,113 @@ export default function AuthPage() {
             </Button>
           </form>
 
+          {mode === 'login' && (
+            <div className="mt-3 mb-3 text-center">
+              {!showForgotPassword ? (
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotPassword(true); setError(''); setMessage(''); }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Forgot password?
+                </button>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="mt-3 space-y-3">
+                  <Input
+                    type="email"
+                    placeholder="Enter your email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm"
+                    required
+                  />
+                  <Button type="submit" size="sm" className="w-full bg-secondary text-black">
+                    Send reset instructions
+                  </Button>
+                  <button
+                    type="button"
+                    className="text-xs text-zinc-400 hover:text-white"
+                    onClick={() => setShowForgotPassword(false)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
+          {showResetPassword && (
+            <div className="mt-3 mb-3">
+              <form onSubmit={handleResetPassword} className="space-y-3">
+                <div>
+                  <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">OTP</label>
+                  <Input
+                    type="text"
+                    placeholder="Enter 6-digit OTP"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 text-sm text-center tracking-widest"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs md:text-sm font-medium text-zinc-400 mb-1 block">New Password</label>
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Min 6 characters"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="bg-white/5 border-white/10 h-10 md:h-12 rounded-xl text-white placeholder:text-zinc-600 focus:ring-primary/50 pr-10 md:pr-12 text-sm"
+                      required
+                      minLength={6}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 md:right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors p-1"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4 md:w-5 md:h-5" /> : <Eye className="w-4 h-4 md:w-5 md:h-5" />}
+                    </button>
+                  </div>
+                </div>
+                <Button type="submit" size="sm" className="w-full bg-secondary text-black">
+                  Reset Password
+                </Button>
+                <button
+                  type="button"
+                  className="text-xs text-zinc-400 hover:text-white block w-full"
+                  onClick={() => {
+                    setShowResetPassword(false);
+                    setOtp('');
+                    setNewPassword('');
+                    setResetEmail('');
+                    setError('');
+                    setMessage('');
+                  }}
+                >
+                  Cancel
+                </button>
+              </form>
+            </div>
+          )}
+
           <p className="text-xs md:text-sm text-zinc-500 mt-4 md:mt-6 text-center">
             {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
             <button
               data-testid="auth-toggle-mode"
-              onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setMessage(''); }}
+              onClick={() => { 
+                setMode(mode === 'login' ? 'register' : 'login'); 
+                setError(''); 
+                setMessage('');
+                setRememberMe(false);
+              }}
               className="text-primary hover:underline font-medium"
             >
               {mode === 'login' ? 'Sign Up' : 'Sign In'}
             </button>
           </p>
-
-          <div className="mt-4 md:mt-6 pt-4 md:pt-6 border-t border-white/10">
-            <p className="text-xs text-zinc-600 text-center mb-3">Administrator Access?</p>
-            <button
-              onClick={() => navigate('/admin/login')}
-              className="w-full px-3 md:px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs md:text-sm font-medium transition-colors duration-200 text-zinc-400 hover:text-zinc-300"
-            >
-              Admin Portal
-            </button>
-          </div>
         </div>
       </motion.div>
     </div>

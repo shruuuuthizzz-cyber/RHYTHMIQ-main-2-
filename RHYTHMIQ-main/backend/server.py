@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 import spotipy
@@ -36,12 +36,12 @@ except ImportError:
 
 try:
     from .database import get_db, engine, Base, AsyncSessionLocal
-    from .models import User, Playlist, PlaylistSong, Like, Rating, ListeningHistory, DNASnapshot, LyraMessage, EmailVerification, OAuthIdentity, EmailCampaign, UserLogin, AdminRecommendation
+    from .models import User, Playlist, PlaylistSong, Like, Rating, ListeningHistory, DNASnapshot, LyraMessage, EmailVerification, OAuthIdentity, EmailCampaign, UserLogin, AdminRecommendation, PasswordResetToken
     from .sample_data import (SAMPLE_TRACKS, SAMPLE_ARTISTS, SAMPLE_ALBUMS, SAMPLE_AUDIO_FEATURES,
                               get_sample_tracks_for_period, search_sample_data)
 except ImportError:
     from database import get_db, engine, Base, AsyncSessionLocal
-    from models import User, Playlist, PlaylistSong, Like, Rating, ListeningHistory, DNASnapshot, LyraMessage, EmailVerification, OAuthIdentity, EmailCampaign, UserLogin, AdminRecommendation
+    from models import User, Playlist, PlaylistSong, Like, Rating, ListeningHistory, DNASnapshot, LyraMessage, EmailVerification, OAuthIdentity, EmailCampaign, UserLogin, AdminRecommendation, PasswordResetToken
     from sample_data import (SAMPLE_TRACKS, SAMPLE_ARTISTS, SAMPLE_ALBUMS, SAMPLE_AUDIO_FEATURES,
                              get_sample_tracks_for_period, search_sample_data)
 
@@ -180,6 +180,14 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
 
 class AdminRecommendationCreate(BaseModel):
     target_user_id: str
@@ -1980,8 +1988,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @api_router.post("/auth/login")
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == req.email))
-    user = result.scalar_one_or_none()
+    identifier = req.email.strip()
+    if identifier.count("@") == 1:
+        user_result = await db.execute(select(User).where(User.email.ilike(identifier)))
+    else:
+        user_result = await db.execute(select(User).where(User.username.ilike(identifier)))
+    user = user_result.scalar_one_or_none()
     if not user or not bcrypt.checkpw(req.password.encode('utf-8'), user.password_hash.encode('utf-8')):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -1996,6 +2008,95 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     await handle_post_login_email_flow(user, db)
     token = create_token(user.id, user.username)
     return {"token": token, "user": await build_user_payload(user, db)}
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    user_result = await db.execute(select(User).where(User.email.ilike(req.email.strip())))
+    user = user_result.scalar_one_or_none()
+    
+    if user:
+        # Generate 6-digit OTP
+        import random
+        otp = str(random.randint(100000, 999999))
+        
+        # Set expiration to 15 minutes from now
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        
+        # Create password reset token
+        reset_token = PasswordResetToken(
+            id=str(uuid.uuid4()),
+            user_id=user.id,
+            email=user.email,
+            otp=otp,
+            expires_at=expires_at,
+        )
+        db.add(reset_token)
+        await db.commit()
+        
+        # Send OTP via email
+        subject = "RHYTHMIQ Password Reset OTP"
+        html_content = f"""
+        <html>
+          <body style="font-family: Arial, sans-serif; background:#050505; color:#f5f5f5; padding:24px;">
+            <div style="max-width:640px; margin:0 auto; background:#0f0f0f; border-radius:24px; padding:32px; border:1px solid #1f1f1f;">
+              <p style="letter-spacing:0.24em; text-transform:uppercase; color:#00F0FF; font-size:12px; margin:0 0 12px;">Password Reset</p>
+              <h1 style="margin:0 0 16px; color:#FF4D00; font-size:32px;">Reset your RHYTHMIQ password</h1>
+              <p style="line-height:1.7; color:#d4d4d8;">
+                Hi {user.username}, we received a request to reset your password. Use the OTP below to reset your password.
+              </p>
+              <div style="background:#18181b; border-radius:12px; padding:24px; margin:24px 0; text-align:center;">
+                <p style="margin:0 0 8px; color:#a1a1aa; font-size:14px;">Your One-Time Password</p>
+                <p style="margin:0; color:#FF4D00; font-size:36px; font-weight:bold; letter-spacing:4px;">{otp}</p>
+                <p style="margin:16px 0 0; color:#71717a; font-size:12px;">This OTP expires in 15 minutes</p>
+              </div>
+              <p style="margin:24px 0 0; color:#a1a1aa; font-size:14px;">
+                If you didn't request this password reset, please ignore this email.
+              </p>
+            </div>
+          </body>
+        </html>
+        """
+        
+        if send_brevo_email(user.email, subject, html_content):
+            logger.info("Password reset OTP sent to user: %s", user.email)
+        else:
+            logger.error("Failed to send password reset OTP to user: %s", user.email)
+    
+    return {"detail": "If this email is registered, password reset instructions have been sent."}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    # Find the user
+    user_result = await db.execute(select(User).where(User.email.ilike(req.email.strip())))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid email or OTP")
+    
+    # Find valid reset token
+    token_result = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.otp == req.otp,
+            PasswordResetToken.used == False,
+            PasswordResetToken.expires_at > datetime.now(timezone.utc)
+        ).order_by(PasswordResetToken.created_at.desc()).limit(1)
+    )
+    token = token_result.scalar_one_or_none()
+    if not token:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+    
+    # Update password
+    hashed_password = hash_password(req.new_password)
+    user.password_hash = hashed_password
+    
+    # Mark token as used
+    token.used = True
+    
+    await db.commit()
+    
+    return {"detail": "Password reset successfully"}
 
 
 @api_router.post("/auth/google")

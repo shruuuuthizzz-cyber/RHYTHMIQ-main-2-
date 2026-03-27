@@ -32,6 +32,17 @@ api.interceptors.response.use(
       localStorage.removeItem('rhythmiq_user');
       window.location.href = adminMode ? '/admin/login' : '/auth';
     }
+    // Attach detailed error messages for network errors
+    if (!err.response) {
+      err.message = err.message || 'Network error. Make sure the backend server is running on port 8000.';
+      if (err.code === 'ECONNABORTED') {
+        err.message = 'Request timeout. Backend server may be unresponsive.';
+      } else if (err.code === 'ECONNREFUSED') {
+        err.message = 'Connection refused. Backend server is not running on port 8000.';
+      } else if (err.message.includes('Network Error')) {
+        err.message = 'Network error. Check your internet connection and backend server status.';
+      }
+    }
     return Promise.reject(err);
   }
 );
@@ -40,6 +51,8 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
+  forgotPassword: (data) => api.post('/auth/forgot-password', data),
+  resetPassword: (data) => api.post('/auth/reset-password', data),
   googleLogin: (credential) => api.post('/auth/google', { credential }),
   me: () => api.get('/auth/me'),
 };

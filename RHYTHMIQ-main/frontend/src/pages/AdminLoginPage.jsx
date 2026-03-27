@@ -5,6 +5,7 @@ import { Music2, ArrowLeft, Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
+import { parseErrorDetail } from '@/lib/utils';
 
 export default function AdminLoginPage() {
   const [email, setEmail] = useState('');
@@ -31,7 +32,8 @@ export default function AdminLoginPage() {
       
       navigate('/admin');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Admin login failed. Check your credentials.');
+      const errorMsg = parseErrorDetail(err.response?.data?.detail) || 'Admin login failed. Check your credentials.';
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -55,15 +57,7 @@ export default function AdminLoginPage() {
         className="relative z-10 w-full max-w-md mx-4"
       >
         <div className="flex items-center justify-between mb-8">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/auth')}
-            className="text-zinc-400 hover:text-white"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to User Login
-          </Button>
+          <h2 className="text-sm text-zinc-400">Admin login is separate from user login.</h2>
         </div>
 
         <div className="rounded-[28px] border border-white/10 bg-black/60 backdrop-blur-xl p-8 shadow-2xl shadow-black/30">

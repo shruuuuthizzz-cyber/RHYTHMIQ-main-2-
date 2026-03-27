@@ -175,6 +175,19 @@ class EmailCampaign(Base):
     user = relationship('User', back_populates='email_campaigns')
 
 
+class PasswordResetToken(Base):
+    __tablename__ = 'password_reset_tokens'
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    otp = Column(String(6), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship('User')
+
+
 class LyraMessage(Base):
     __tablename__ = 'lyra_messages'
     id = Column(String(36), primary_key=True, default=generate_uuid)
