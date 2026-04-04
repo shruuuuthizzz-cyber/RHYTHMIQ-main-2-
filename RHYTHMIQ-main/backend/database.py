@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
+load_dotenv(Path(__file__).parent / '.env.local')
 load_dotenv(Path(__file__).parent / '.env')
 
 DATABASE_URL = os.environ.get('DATABASE_URL')

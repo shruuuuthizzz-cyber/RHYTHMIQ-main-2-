@@ -43,6 +43,8 @@ export default function AdminPage() {
   });
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const [sendingKey, setSendingKey] = useState('');
+  const [databaseTables, setDatabaseTables] = useState([]);
+  const [databaseMeta, setDatabaseMeta] = useState(null);
 
   const adminEmails = useMemo(
     () => (process.env.REACT_APP_ADMIN_EMAILS || '')
@@ -116,10 +118,11 @@ export default function AdminPage() {
     setError('');
 
     try {
-      const [usersRes, statsRes, loginsRes] = await Promise.all([
+      const [usersRes, statsRes, loginsRes, databaseRes] = await Promise.all([
         adminAPI.getUsers(),
         adminAPI.getUserStatistics(),
         adminAPI.getLoginHistory(),
+        adminAPI.getDatabaseTables(),
       ]);
 
       const nextUsers = usersRes.data || [];
@@ -129,6 +132,8 @@ export default function AdminPage() {
       setUsers(nextUsers);
       setStatistics(nextStats);
       setLoginHistory(nextLogins);
+      setDatabaseTables(databaseRes?.data?.tables || []);
+      setDatabaseMeta(databaseRes?.data || null);
 
       const firstNonAdminWithTaste = nextStats.find((entry) => {
         const detail = nextUsers.find((candidate) => candidate.id === entry.id);
@@ -164,7 +169,7 @@ export default function AdminPage() {
         listenerMatches: [],
         similarArtistTracks: [],
       });
-      toast.error(err.response?.data?.detail || 'Failed to load collaborative recommendations');
+      toast.error(parseErrorDetail(err.response?.data?.detail) || 'Failed to load collaborative recommendations');
     } finally {
       setLoadingRecommendations(false);
     }
@@ -220,6 +225,7 @@ export default function AdminPage() {
     setSendingKey(requestKey);
 
     try {
+      const normalizedScore = Number.isFinite(Number(track.score)) ? Math.round(Number(track.score)) : null;
       const response = await adminAPI.sendRecommendation({
         target_user_id: targetUser.id,
         spotify_track_id: track.spotify_track_id,
@@ -230,7 +236,7 @@ export default function AdminPage() {
         duration_ms: track.duration_ms,
         preview_url: track.preview_url,
         source_type: sourceType,
-        score: track.score || null,
+        score: normalizedScore,
       });
 
       const savedRecommendation = response.data?.recommendation;
@@ -252,7 +258,7 @@ export default function AdminPage() {
       toast.success(`Recommended "${track.track_name}" to ${targetUser.username}`);
     } catch (err) {
       console.error(err);
-      toast.error(err.response?.data?.detail || 'Failed to send recommendation');
+      toast.error(parseErrorDetail(err.response?.data?.detail) || 'Failed to send recommendation');
     } finally {
       setSendingKey('');
     }
@@ -269,6 +275,34 @@ export default function AdminPage() {
   const handleSignOut = () => {
     logout();
     navigate('/admin/login', { replace: true });
+  };
+
+  const normalizeText = (value, fallback = '') => {
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (value == null) {
+      return fallback;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => normalizeText(item)).filter(Boolean).join(', ') || fallback;
+    }
+
+    if (typeof value === 'object') {
+      return (
+        value.msg
+        || value.message
+        || value.detail
+        || value.reason
+        || value.name
+        || fallback
+        || JSON.stringify(value)
+      );
+    }
+
+    return String(value);
   };
 
   const renderRecommendationList = ({
@@ -291,16 +325,20 @@ export default function AdminPage() {
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
         {items.map((recommendation) => {
           const currentKey = `${selectedUser.id}:${recommendation.spotify_track_id}`;
-          const metaText = recommendation.reason
-            || (recommendation.recommended_by?.length
-              ? `Similar users: ${recommendation.recommended_by.join(', ')}`
-              : fallbackLabel);
+          const recommendedBy = Array.isArray(recommendation.recommended_by)
+            ? recommendation.recommended_by.map((item) => normalizeText(item)).filter(Boolean)
+            : [];
+          const metaText = normalizeText(
+            recommendation.reason
+            || (recommendedBy.length ? `Similar users: ${recommendedBy.join(', ')}` : fallbackLabel),
+            fallbackLabel,
+          );
 
           return (
             <div key={recommendation.spotify_track_id} className={`flex items-center justify-between gap-3 p-3 rounded-lg border ${cardClassName}`}>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{recommendation.track_name}</p>
-                <p className="text-xs text-muted-foreground truncate">{recommendation.artist_name}</p>
+                <p className="text-sm font-medium truncate">{normalizeText(recommendation.track_name, 'Unknown track')}</p>
+                <p className="text-xs text-muted-foreground truncate">{normalizeText(recommendation.artist_name, 'Unknown artist')}</p>
                 <p className={`text-xs truncate ${metaClassName}`}>{metaText}</p>
               </div>
               <div className="flex items-center gap-2">
@@ -367,6 +405,40 @@ export default function AdminPage() {
       {error && (
         <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20">
           <p className="text-sm text-red-400">{error}</p>
+        </div>
+      )}
+
+      {databaseMeta && (
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Connected Database Tables</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Current app database: {databaseMeta.backend}
+                {databaseMeta.is_supabase_database ? ' (Supabase PostgreSQL)' : ' (local app database)'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Supabase project auth connection: {databaseMeta.supabase_project_connected ? 'configured' : 'not configured'}
+              </p>
+            </div>
+            <div className="text-right text-sm text-muted-foreground">
+              <p>{databaseMeta.table_count || 0} tables</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {databaseTables.map((table) => (
+              <div key={table.name} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className="text-sm font-medium">{table.name}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {table.columns?.length || 0} columns
+                </p>
+                <p className="text-xs text-muted-foreground mt-2 break-words">
+                  {(table.columns || []).join(', ')}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -475,8 +547,8 @@ export default function AdminPage() {
                         {selectedUser.likes.map((like) => (
                           <div key={like.spotify_track_id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/10">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium truncate">{like.track_name}</p>
-                              <p className="text-xs text-muted-foreground truncate">{like.artist_name}</p>
+                              <p className="text-sm font-medium truncate">{normalizeText(like.track_name, 'Unknown track')}</p>
+                              <p className="text-xs text-muted-foreground truncate">{normalizeText(like.artist_name, 'Unknown artist')}</p>
                             </div>
                             <div className="flex items-center gap-2">
                               <Button size="sm" variant="ghost" onClick={() => addToQueue(like)} className="h-8 w-8 p-0">
@@ -572,11 +644,11 @@ export default function AdminPage() {
                           <div key={recommendation.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
                             <div className="flex items-center justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="text-sm font-medium truncate">{recommendation.track_name}</p>
-                                <p className="text-xs text-muted-foreground truncate">{recommendation.artist_name}</p>
+                                <p className="text-sm font-medium truncate">{normalizeText(recommendation.track_name, 'Unknown track')}</p>
+                                <p className="text-xs text-muted-foreground truncate">{normalizeText(recommendation.artist_name, 'Unknown artist')}</p>
                               </div>
                               <div className="text-right text-xs text-muted-foreground">
-                                <p>{recommendation.source_type || 'admin_pick'}</p>
+                                <p>{normalizeText(recommendation.source_type, 'admin_pick')}</p>
                                 <p>{formatDate(recommendation.recommended_at)}</p>
                               </div>
                             </div>
@@ -610,8 +682,8 @@ export default function AdminPage() {
           {selectedSong && (
             <div className="space-y-4">
               <div className="bg-white/5 rounded-lg p-4">
-                <p className="text-sm font-medium">{selectedSong.track_name}</p>
-                <p className="text-xs text-muted-foreground">{selectedSong.artist_name}</p>
+                <p className="text-sm font-medium">{normalizeText(selectedSong.track_name, 'Unknown track')}</p>
+                <p className="text-xs text-muted-foreground">{normalizeText(selectedSong.artist_name, 'Unknown artist')}</p>
               </div>
 
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">

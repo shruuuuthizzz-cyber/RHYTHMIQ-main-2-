@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { authAPI } from '@/lib/api';
+import { authAPI, supabaseAPI } from '@/lib/api';
 import { Music2, ArrowRight, Sparkles, Mail, Eye, EyeOff } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,7 @@ export default function AuthPage() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [supabaseState, setSupabaseState] = useState({ loaded: false, connected: false });
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   const googleButtonRef = useRef(null);
   const { login, register, googleLogin } = useAuth();
@@ -50,6 +51,31 @@ export default function AuthPage() {
         console.error('Error loading saved credentials:', e);
       }
     }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    supabaseAPI.status()
+      .then((res) => {
+        if (active) {
+          setSupabaseState({
+            loaded: true,
+            connected: Boolean(res.data?.connected),
+          });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSupabaseState({
+            loaded: true,
+            connected: false,
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -227,6 +253,14 @@ export default function AuthPage() {
           <p className="text-muted-foreground mb-6 text-sm md:text-base">
             Spotify-style discovery, YouTube-backed playback, and a Music DNA that evolves with every song.
           </p>
+
+          <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs md:text-sm text-zinc-300">
+            {supabaseState.loaded ? (
+              supabaseState.connected ? 'Supabase is connected to this project.' : 'Supabase is not reachable yet.'
+            ) : (
+              'Checking Supabase connection...'
+            )}
+          </div>
 
           {canUseGoogleLogin ? (
             <div className="mb-6">

@@ -1,0 +1,391 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+2 0 obj
+<< /Length 1392 >>
+stream
+BT
+/F1 10 Tf
+48 742 Td
+14 TL
+(RHYTHMIQ DATABASE ERD) Tj
+T*
+(=====================) Tj
+T*
+() Tj
+T*
+(CORE RELATIONSHIPS) Tj
+T*
+(------------------) Tj
+T*
+([USERS] 1 ---- * [PLAYLISTS] 1 ---- * [PLAYLIST_SONGS]) Tj
+T*
+([USERS] 1 ---- * [LIKES]) Tj
+T*
+([USERS] 1 ---- * [RATINGS]) Tj
+T*
+([USERS] 1 ---- * [LISTENING_HISTORY]) Tj
+T*
+([USERS] 1 ---- * [DNA_SNAPSHOTS]) Tj
+T*
+([USERS] 1 ---- * [EMAIL_VERIFICATIONS]) Tj
+T*
+([USERS] 1 ---- * [OAUTH_IDENTITIES]) Tj
+T*
+([USERS] 1 ---- * [EMAIL_CAMPAIGNS]) Tj
+T*
+([USERS] 1 ---- * [PASSWORD_RESET_TOKENS]) Tj
+T*
+([USERS] 1 ---- * [LYRA_MESSAGES]) Tj
+T*
+([USERS] 1 ---- * [USER_LOGINS]) Tj
+T*
+([USERS] 1 ---- * [ADMIN_RECOMMENDATIONS] via admin_user_id) Tj
+T*
+([USERS] 1 ---- * [ADMIN_RECOMMENDATIONS] via target_user_id) Tj
+T*
+() Tj
+T*
+(TABLES) Tj
+T*
+(------) Tj
+T*
+([USERS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- username \(UK\)) Tj
+T*
+(- email \(UK\)) Tj
+T*
+(- password_hash) Tj
+T*
+(- avatar_url) Tj
+T*
+(- country) Tj
+T*
+(- created_at) Tj
+T*
+() Tj
+T*
+([PLAYLISTS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- name) Tj
+T*
+(- description) Tj
+T*
+(- is_public) Tj
+T*
+(- cover_url) Tj
+T*
+(- created_at) Tj
+T*
+() Tj
+T*
+([PLAYLIST_SONGS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- playlist_id \(FK -> playlists.id\)) Tj
+T*
+(- spotify_track_id) Tj
+T*
+(- track_name) Tj
+T*
+(- artist_name) Tj
+T*
+(- album_name) Tj
+T*
+(- album_image) Tj
+T*
+(- duration_ms) Tj
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 10 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Length 1087 >>
+stream
+BT
+/F1 10 Tf
+48 742 Td
+14 TL
+(- preview_url) Tj
+T*
+(- position) Tj
+T*
+(- added_at) Tj
+T*
+() Tj
+T*
+([LIKES]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- spotify_track_id) Tj
+T*
+(- track_name) Tj
+T*
+(- artist_name) Tj
+T*
+(- album_name) Tj
+T*
+(- album_image) Tj
+T*
+(- duration_ms) Tj
+T*
+(- preview_url) Tj
+T*
+(- liked_at) Tj
+T*
+() Tj
+T*
+([RATINGS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- spotify_track_id) Tj
+T*
+(- track_name) Tj
+T*
+(- artist_name) Tj
+T*
+(- album_image) Tj
+T*
+(- stars) Tj
+T*
+(- rated_at) Tj
+T*
+() Tj
+T*
+([LISTENING_HISTORY]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- spotify_track_id) Tj
+T*
+(- track_name) Tj
+T*
+(- artist_name) Tj
+T*
+(- genre) Tj
+T*
+(- play_duration) Tj
+T*
+(- skipped) Tj
+T*
+(- played_at) Tj
+T*
+() Tj
+T*
+([DNA_SNAPSHOTS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- week) Tj
+T*
+(- genre_breakdown \(JSON\)) Tj
+T*
+(- mood_breakdown \(JSON\)) Tj
+T*
+(- top_artists \(JSON\)) Tj
+T*
+(- calculated_at) Tj
+T*
+() Tj
+T*
+([EMAIL_VERIFICATIONS]) Tj
+T*
+(- id \(PK\)) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 10 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 1064 >>
+stream
+BT
+/F1 10 Tf
+48 742 Td
+14 TL
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- email) Tj
+T*
+(- verified_at) Tj
+T*
+(- created_at) Tj
+T*
+() Tj
+T*
+([OAUTH_IDENTITIES]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- provider) Tj
+T*
+(- provider_user_id) Tj
+T*
+(- email) Tj
+T*
+(- created_at) Tj
+T*
+() Tj
+T*
+([EMAIL_CAMPAIGNS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- email) Tj
+T*
+(- campaign_type) Tj
+T*
+(- period_key) Tj
+T*
+(- payload \(JSON\)) Tj
+T*
+(- sent_at) Tj
+T*
+() Tj
+T*
+([PASSWORD_RESET_TOKENS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- email) Tj
+T*
+(- otp) Tj
+T*
+(- expires_at) Tj
+T*
+(- used) Tj
+T*
+(- created_at) Tj
+T*
+() Tj
+T*
+([LYRA_MESSAGES]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- role) Tj
+T*
+(- content) Tj
+T*
+(- created_at) Tj
+T*
+() Tj
+T*
+([USER_LOGINS]) Tj
+T*
+(- id \(PK\)) Tj
+T*
+(- user_id \(FK -> users.id\)) Tj
+T*
+(- login_method) Tj
+T*
+(- ip_address) Tj
+T*
+(- user_agent) Tj
+T*
+(- logged_in_at) Tj
+T*
+() Tj
+T*
+([ADMIN_RECOMMENDATIONS]) Tj
+T*
+(- id \(PK\)) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 10 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 350 >>
+stream
+BT
+/F1 10 Tf
+48 742 Td
+14 TL
+(- admin_user_id \(FK -> users.id\)) Tj
+T*
+(- target_user_id \(FK -> users.id\)) Tj
+T*
+(- spotify_track_id) Tj
+T*
+(- track_name) Tj
+T*
+(- artist_name) Tj
+T*
+(- album_name) Tj
+T*
+(- album_image) Tj
+T*
+(- duration_ms) Tj
+T*
+(- preview_url) Tj
+T*
+(- source_type) Tj
+T*
+(- score) Tj
+T*
+(- note) Tj
+T*
+(- recommended_at) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 10 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R 9 0 R] /Count 4 >>
+endobj
+11 0 obj
+<< /Type /Catalog /Pages 10 0 R >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000009 00000 n 
+0000000077 00000 n 
+0000001521 00000 n 
+0000001648 00000 n 
+0000002787 00000 n 
+0000002914 00000 n 
+0000004030 00000 n 
+0000004157 00000 n 
+0000004558 00000 n 
+0000004685 00000 n 
+0000004761 00000 n 
+trailer
+<< /Size 12 /Root 11 0 R >>
+startxref
+4812
+%%EOF

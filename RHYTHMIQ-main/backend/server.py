@@ -18,7 +18,7 @@ import jwt
 import bcrypt
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-from sqlalchemy import select, delete, func, and_
+from sqlalchemy import select, delete, func, and_, inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from urllib import parse as urllib_parse
@@ -35,18 +35,21 @@ except ImportError:
     YoutubeDL = None
 
 try:
-    from .database import get_db, engine, Base, AsyncSessionLocal
+    from .database import get_db, engine, Base, AsyncSessionLocal, DATABASE_URL
     from .models import User, Playlist, PlaylistSong, Like, Rating, ListeningHistory, DNASnapshot, LyraMessage, EmailVerification, OAuthIdentity, EmailCampaign, UserLogin, AdminRecommendation, PasswordResetToken
+    from .supabase_client import get_supabase_user, ping_supabase, supabase_enabled
     from .sample_data import (SAMPLE_TRACKS, SAMPLE_ARTISTS, SAMPLE_ALBUMS, SAMPLE_AUDIO_FEATURES,
                               get_sample_tracks_for_period, search_sample_data)
 except ImportError:
-    from database import get_db, engine, Base, AsyncSessionLocal
+    from database import get_db, engine, Base, AsyncSessionLocal, DATABASE_URL
     from models import User, Playlist, PlaylistSong, Like, Rating, ListeningHistory, DNASnapshot, LyraMessage, EmailVerification, OAuthIdentity, EmailCampaign, UserLogin, AdminRecommendation, PasswordResetToken
+    from supabase_client import get_supabase_user, ping_supabase, supabase_enabled
     from sample_data import (SAMPLE_TRACKS, SAMPLE_ARTISTS, SAMPLE_ALBUMS, SAMPLE_AUDIO_FEATURES,
                              get_sample_tracks_for_period, search_sample_data)
 
 ROOT_DIR = Path(__file__).parent
 FRONTEND_BUILD_DIR = ROOT_DIR.parent / "frontend" / "build"
+load_dotenv(ROOT_DIR / '.env.local')
 load_dotenv(ROOT_DIR / '.env')
 
 # Configure logging
@@ -199,7 +202,7 @@ class AdminRecommendationCreate(BaseModel):
     duration_ms: Optional[int] = None
     preview_url: Optional[str] = None
     source_type: Optional[str] = None
-    score: Optional[int] = None
+    score: Optional[float] = None
     note: Optional[str] = None
 
 class GoogleLoginRequest(BaseModel):
@@ -1162,6 +1165,36 @@ async def build_user_payload(user: User, db: AsyncSession) -> dict:
     }
 
 
+async def sync_supabase_user_profile(db: AsyncSession, profile: dict) -> User:
+    email = (profile.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Supabase profile did not include an email")
+
+    result = await db.execute(select(User).where(User.email.ilike(email)))
+    user = result.scalar_one_or_none()
+    if user:
+        return user
+
+    metadata = profile.get("user_metadata") or {}
+    display_name = (
+        metadata.get("full_name")
+        or metadata.get("name")
+        or profile.get("user_metadata", {}).get("name")
+        or email.split("@")[0]
+    )
+    username = await generate_unique_username(str(display_name).replace(" ", "_").lower(), db)
+    user = User(
+        id=str(uuid.uuid4()),
+        username=username,
+        email=email,
+        password_hash=hash_password(uuid.uuid4().hex),
+        avatar_url=metadata.get("avatar_url") or profile.get("avatar_url"),
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
 def serialize_like(like: Like) -> dict:
     return {
         "spotify_track_id": like.spotify_track_id,
@@ -1172,6 +1205,21 @@ def serialize_like(like: Like) -> dict:
         "duration_ms": like.duration_ms,
         "preview_url": like.preview_url,
         "liked_at": like.liked_at.isoformat() if like.liked_at else None,
+    }
+
+
+def serialize_history_entry(entry: ListeningHistory) -> dict:
+    return {
+        "spotify_track_id": entry.spotify_track_id,
+        "track_name": entry.track_name,
+        "artist_name": entry.artist_name,
+        "album_name": None,
+        "album_image": None,
+        "duration_ms": None,
+        "preview_url": None,
+        "played_at": entry.played_at.isoformat() if entry.played_at else None,
+        "genre": entry.genre,
+        "skipped": entry.skipped,
     }
 
 
@@ -1214,6 +1262,22 @@ def dedupe_tracks(tracks: List[dict]) -> List[dict]:
         unique_tracks.append(track)
 
     return unique_tracks
+
+
+def build_database_label() -> dict:
+    database_url = DATABASE_URL or ""
+    if database_url.startswith("postgresql"):
+        backend = "PostgreSQL"
+    elif database_url.startswith("sqlite"):
+        backend = "SQLite"
+    else:
+        backend = "Unknown"
+
+    return {
+        "backend": backend,
+        "database_url": database_url,
+        "is_supabase_database": "supabase.co" in database_url,
+    }
 
 
 async def collect_youtube_track_candidates(queries: List[str], per_query: int = 8) -> List[dict]:
@@ -1392,6 +1456,7 @@ async def build_collaborative_recommendations(target_user_id: str, db: AsyncSess
     target_likes_result = await db.execute(select(Like).where(Like.user_id == target_user_id))
     target_likes = target_likes_result.scalars().all()
     target_track_ids = {like.spotify_track_id for like in target_likes}
+    target_taste_profile = await build_user_taste_profile(target_user_id, db)
 
     existing_recommendations_result = await db.execute(
         select(AdminRecommendation.spotify_track_id).where(AdminRecommendation.target_user_id == target_user_id)
@@ -1399,52 +1464,109 @@ async def build_collaborative_recommendations(target_user_id: str, db: AsyncSess
     existing_track_ids = {row[0] for row in existing_recommendations_result.all()}
 
     likes_result = await db.execute(select(Like, User).join(User, User.id == Like.user_id))
-    rows = likes_result.all()
+    like_rows = likes_result.all()
+    history_result = await db.execute(select(ListeningHistory, User).join(User, User.id == ListeningHistory.user_id))
+    history_rows = history_result.all()
 
     likes_by_user: dict[str, list[Like]] = {}
+    history_by_user: dict[str, list[ListeningHistory]] = {}
     user_lookup: dict[str, User] = {}
-    for like, source_user in rows:
+    for like, source_user in like_rows:
         likes_by_user.setdefault(source_user.id, []).append(like)
+        user_lookup[source_user.id] = source_user
+    for history_entry, source_user in history_rows:
+        history_by_user.setdefault(source_user.id, []).append(history_entry)
         user_lookup[source_user.id] = source_user
 
     listener_matches: dict[str, dict] = {}
-    if target_track_ids:
-        for other_user_id, likes in likes_by_user.items():
-            if other_user_id == target_user_id:
+    user_ids = set(likes_by_user) | set(history_by_user)
+    excluded_track_ids = set(target_track_ids) | existing_track_ids
+
+    for other_user_id in user_ids:
+        if other_user_id == target_user_id:
+            continue
+
+        other_likes = likes_by_user.get(other_user_id, [])
+        other_history = history_by_user.get(other_user_id, [])
+        if not other_likes and not other_history:
+            continue
+
+        other_taste_profile = {
+            **apply_taste_profile(other_likes, [], other_history),
+        }
+        other_taste_profile["top_genres"] = [
+            name for name, _ in sorted(other_taste_profile["genre_counts"].items(), key=lambda item: -item[1])[:5]
+        ]
+        other_taste_profile["top_moods"] = [
+            name for name, _ in sorted(other_taste_profile["mood_scores"].items(), key=lambda item: -item[1])[:5]
+        ]
+        other_taste_profile["top_artists"] = [
+            name for name, _ in sorted(other_taste_profile["artist_counts"].items(), key=lambda item: -item[1])[:5]
+        ]
+        other_taste_profile["has_data"] = bool(other_likes or other_history)
+
+        exact_overlap = len(target_track_ids & {like.spotify_track_id for like in other_likes})
+        shared_artists = set(target_taste_profile.get("top_artists", [])) & set(other_taste_profile.get("top_artists", []))
+        shared_genres = set(target_taste_profile.get("top_genres", [])) & set(other_taste_profile.get("top_genres", []))
+        shared_moods = set(target_taste_profile.get("top_moods", [])) & set(other_taste_profile.get("top_moods", []))
+        similarity_score = (
+            exact_overlap * 4
+            + len(shared_artists) * 2.5
+            + len(shared_genres) * 1.5
+            + len(shared_moods) * 1.0
+        )
+
+        if similarity_score <= 0:
+            continue
+
+        source_user = user_lookup.get(other_user_id)
+        source_label = source_user.username if source_user else other_user_id
+        match_reasons = []
+        if exact_overlap:
+            match_reasons.append(f"{exact_overlap} shared likes")
+        if shared_artists:
+            match_reasons.append(f"shared artists: {', '.join(sorted(shared_artists)[:2])}")
+        elif shared_genres:
+            match_reasons.append(f"shared genres: {', '.join(sorted(shared_genres)[:2])}")
+        elif shared_moods:
+            match_reasons.append(f"shared moods: {', '.join(sorted(shared_moods)[:2])}")
+        match_reason = " | ".join(match_reasons) or "Picked from similar listeners"
+
+        source_tracks = [serialize_like(like) for like in other_likes]
+        seen_source_track_ids = {track["spotify_track_id"] for track in source_tracks}
+        for history_entry in other_history:
+            if history_entry.skipped or not history_entry.spotify_track_id:
+                continue
+            if history_entry.spotify_track_id in seen_source_track_ids:
+                continue
+            seen_source_track_ids.add(history_entry.spotify_track_id)
+            source_tracks.append(serialize_history_entry(history_entry))
+
+        for track in source_tracks:
+            track_id = track.get("spotify_track_id")
+            if not track_id or track_id in excluded_track_ids:
                 continue
 
-            overlap_count = len(target_track_ids & {like.spotify_track_id for like in likes})
-            if overlap_count == 0:
-                continue
-
-            source_user = user_lookup.get(other_user_id)
-            source_label = source_user.username if source_user else other_user_id
-
-            for like in likes:
-                if like.spotify_track_id in target_track_ids or like.spotify_track_id in existing_track_ids:
-                    continue
-
-                entry = listener_matches.setdefault(
-                    like.spotify_track_id,
-                    {
-                        **serialize_like(like),
-                        "recommended_by": [],
-                        "score": 0,
-                        "source_type": "collaborative_filter",
-                        "reason": "Picked from similar listeners",
-                    },
-                )
-                if source_label not in entry["recommended_by"]:
-                    entry["recommended_by"].append(source_label)
-                entry["score"] += overlap_count
+            entry = listener_matches.setdefault(
+                track_id,
+                {
+                    **track,
+                    "recommended_by": [],
+                    "score": 0.0,
+                    "source_type": "collaborative_filter",
+                    "reason": match_reason,
+                },
+            )
+            if source_label not in entry["recommended_by"]:
+                entry["recommended_by"].append(source_label)
+            entry["score"] += similarity_score
 
     sorted_listener_matches = sorted(
         listener_matches.values(),
         key=lambda recommendation: (-recommendation["score"], recommendation["track_name"] or ""),
     )[:limit]
 
-    taste_profile = await build_user_taste_profile(target_user_id, db)
-    excluded_track_ids = set(target_track_ids) | existing_track_ids
+    taste_profile = target_taste_profile
 
     artist_queries = []
     for artist_name in taste_profile.get("top_artists", [])[:3]:
@@ -1455,10 +1577,16 @@ async def build_collaborative_recommendations(target_user_id: str, db: AsyncSess
     for genre in taste_profile.get("top_genres", [])[:2]:
         artist_queries.append(f"{genre} artist mix")
 
+    if not artist_queries and taste_profile.get("top_moods"):
+        artist_queries.extend(f"{mood} songs" for mood in taste_profile["top_moods"][:2])
+
     artist_candidates = dedupe_tracks(
         collect_related_artist_tracks(taste_profile.get("top_artists", [])) +
         collect_track_candidates(artist_queries, per_query=max(limit, 6))
     )
+
+    if not artist_candidates:
+        artist_candidates = rank_tracks_for_user(SAMPLE_TRACKS, taste_profile, max(limit * 2, 12))
 
     filtered_artist_candidates = [
         track
@@ -1766,12 +1894,24 @@ async def get_current_user(authorization: str = None, db: AsyncSession = Depends
     if not authorization:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-    payload = decode_token(token)
-    result = await db.execute(select(User).where(User.id == payload['user_id']))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+    try:
+        payload = decode_token(token)
+        result = await db.execute(select(User).where(User.id == payload['user_id']))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except HTTPException:
+        pass
+
+    if supabase_enabled():
+        profile = await asyncio.to_thread(get_supabase_user, token)
+        if profile:
+            user = await sync_supabase_user_profile(db, profile)
+            await db.commit()
+            return user
+
+    raise HTTPException(status_code=401, detail="Invalid token")
 
 
 # ─── Admin Routes ───
@@ -1842,6 +1982,37 @@ async def admin_recommendations(
     return {"user_id": target_user_id, **recommendation_groups}
 
 
+@api_router.get("/admin/database-tables")
+async def admin_database_tables(
+    authorization: str = Query(None, alias="authorization"),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await get_current_user(authorization, db)
+    if not is_admin_user(user):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    def read_table_metadata(sync_conn):
+        inspector = inspect(sync_conn)
+        table_names = inspector.get_table_names()
+        return [
+            {
+                "name": table_name,
+                "columns": [column["name"] for column in inspector.get_columns(table_name)],
+            }
+            for table_name in sorted(table_names)
+        ]
+
+    async with engine.begin() as conn:
+        tables = await conn.run_sync(read_table_metadata)
+
+    return {
+        **build_database_label(),
+        "tables": tables,
+        "table_count": len(tables),
+        "supabase_project_connected": supabase_enabled(),
+    }
+
+
 @api_router.post("/admin/recommendations")
 async def create_admin_recommendation(
     req: AdminRecommendationCreate,
@@ -1882,7 +2053,7 @@ async def create_admin_recommendation(
     recommendation.duration_ms = req.duration_ms
     recommendation.preview_url = req.preview_url
     recommendation.source_type = req.source_type or "admin_pick"
-    recommendation.score = req.score
+    recommendation.score = int(round(req.score)) if req.score is not None else None
     recommendation.note = req.note
     recommendation.recommended_at = datetime.now(timezone.utc)
 
@@ -2174,6 +2345,15 @@ async def get_me(authorization: str = Query(None, alias="authorization"), db: As
         raise HTTPException(status_code=401, detail="Not authenticated")
     user = await get_current_user(authorization, db)
     return await build_user_payload(user, db)
+
+
+@api_router.get("/supabase/status")
+async def supabase_status():
+    status = await asyncio.to_thread(ping_supabase)
+    return {
+        "configured": supabase_enabled(),
+        **status,
+    }
 
 
 @api_router.get("/recommendations/admin")

@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { supabaseAPI } from '@/lib/api';
 import { Music2, ArrowLeft, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { parseErrorDetail } from '@/lib/utils';
 
 const googleClientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 
@@ -11,6 +13,7 @@ export default function GoogleAuthPage() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [supabaseState, setSupabaseState] = useState({ loaded: false, connected: false });
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   const googleButtonRef = useRef(null);
   const { googleLogin } = useAuth();
@@ -18,6 +21,32 @@ export default function GoogleAuthPage() {
   const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
   const isPreviewHost = ['loca.lt', 'localtunnel.me', 'trycloudflare.com'].some((domain) => hostname.endsWith(domain));
   const canUseGoogleLogin = Boolean(googleClientId) && !isPreviewHost;
+
+  useEffect(() => {
+    let active = true;
+
+    supabaseAPI.status()
+      .then((res) => {
+        if (active) {
+          setSupabaseState({
+            loaded: true,
+            connected: Boolean(res.data?.connected),
+          });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSupabaseState({
+            loaded: true,
+            connected: false,
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (isPreviewHost) {
@@ -53,7 +82,7 @@ export default function GoogleAuthPage() {
             setMessage('Sign in successful! Redirecting...');
             setTimeout(() => navigate('/'), 1500);
           } catch (err) {
-            setError(err.response?.data?.detail || err.message || 'Google login failed. Please try again.');
+            setError(parseErrorDetail(err.response?.data?.detail) || err.message || 'Google login failed. Please try again.');
             setGoogleLoading(false);
           }
         },
@@ -130,6 +159,14 @@ export default function GoogleAuthPage() {
           <p className="text-muted-foreground mb-6 md:mb-8 text-center text-sm md:text-base">
             Continue with your Google account to access RHYTHMIQ
           </p>
+
+          <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs md:text-sm text-zinc-300 text-center">
+            {supabaseState.loaded ? (
+              supabaseState.connected ? 'Supabase is connected to this project.' : 'Supabase is not reachable yet.'
+            ) : (
+              'Checking Supabase connection...'
+            )}
+          </div>
 
           {error && (
             <div className="mb-6 p-3 md:p-4 rounded-lg bg-red-500/10 border border-red-500/20">

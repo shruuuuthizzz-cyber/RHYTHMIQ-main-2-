@@ -57,6 +57,10 @@ export const authAPI = {
   me: () => api.get('/auth/me'),
 };
 
+export const supabaseAPI = {
+  status: () => api.get('/supabase/status'),
+};
+
 // Spotify
 export const spotifyAPI = {
   search: (q, type = 'track', limit = 20) => api.get('/spotify/search', { params: { q, type, limit } }),
@@ -168,6 +172,7 @@ export const songDiveAPI = {
 export const adminAPI = {
   getUsers: () => api.get('/admin/users'),
   getRecommendations: (userId = null) => api.get('/admin/recommendations', { params: userId ? { user_id: userId } : {} }),
+  getDatabaseTables: () => api.get('/admin/database-tables'),
   getUserStatistics: () => api.get('/admin/user-statistics'),
   getLoginHistory: (userId = null) => api.get('/admin/login-history', { params: userId ? { user_id: userId } : {} }),
   sendRecommendation: (data) => api.post('/admin/recommendations', data),
